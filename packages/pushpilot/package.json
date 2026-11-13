@@ -1,0 +1,61 @@
+{
+	"name": "pushpilot",
+	"version": "0.1.0",
+	"description": "Web Push for applications that own their infrastructure.",
+	"type": "module",
+	"license": "MIT",
+	"author": "Yousef Elassal",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/yousefelassal/pushpilot.git"
+	},
+	"sideEffects": false,
+	"engines": {
+		"node": ">=22"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"exports": {
+		"./server": {
+			"types": "./dist/server/index.d.ts",
+			"import": "./dist/server/index.js"
+		},
+		"./client": {
+			"types": "./dist/client/index.d.ts",
+			"import": "./dist/client/index.js"
+		},
+		"./react": {
+			"types": "./dist/react/index.d.ts",
+			"import": "./dist/react/index.js"
+		},
+		"./sw": {
+			"types": "./dist/sw/index.d.ts",
+			"import": "./dist/sw/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"bin": {
+		"pushpilot": "./dist/cli/index.js"
+	},
+	"scripts": {
+		"build": "tsdown && node ../../scripts/package-assets.mjs",
+		"check": "publint && attw --pack --profile esm-only"
+	},
+	"dependencies": {
+		"@block65/webcrypto-web-push": "^2.0.0"
+	},
+	"peerDependencies": {
+		"react": "^18.0.0 || ^19.0.0"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"react": "19.2.7"
+	}
+}

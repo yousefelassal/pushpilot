@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+SPEC.md
+.audit/
+**/dist/
+**/.astro/
+**/.next/
+**/build/
+examples/*/public/
+packages/pushpilot/README.md
+packages/pushpilot/LICENSE
