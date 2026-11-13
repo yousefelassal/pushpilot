@@ -1,0 +1,71 @@
+---
+title: Build and register the service worker
+---
+
+The application owns worker registration, activation, and caching. Put `handlePush` at the top level of its worker script.
+
+```ts
+// src/sw.ts
+import { handlePush } from 'pushpilot/sw';
+handlePush({
+	fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
+});
+```
+
+## Vite with vite-plugin-pwa
+
+Use injectManifest so your source worker owns the push listeners. There is no pushpilot Vite plugin.
+
+```ts
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
+export default defineConfig({
+	plugins: [
+		VitePWA({
+			strategies: 'injectManifest',
+			srcDir: 'src',
+			filename: 'sw.ts',
+			injectManifest: { injectionPoint: undefined },
+			manifest: {
+				name: 'My app',
+				short_name: 'My app',
+				start_url: '/',
+				display: 'standalone',
+			},
+		}),
+	],
+});
+```
+
+Set `injectionPoint` to undefined only when your worker does not use a precache manifest. If you use `precacheAndRoute(self.__WB_MANIFEST)`, retain the plugin's default injection point. Register through the PWA plugin's registration helper before starting the push client. Do not also register a second worker manually.
+
+## Existing Workbox or Serwist worker
+
+Add `handlePush` beside existing precache and fetch handlers. Keep the push endpoint out of every cache policy. For Workbox:
+
+```ts
+import { registerRoute } from 'workbox-routing';
+import { NetworkOnly } from 'workbox-strategies';
+registerRoute(
+	({ url }) => url.pathname === '/api/push',
+	new NetworkOnly(),
+	'POST',
+);
+```
+
+Register this before a broader API route. Do not install a second push handler that also calls `showNotification`. For Serwist, use its NetworkOnly strategy or bypass the endpoint in the application's runtimeCaching rules.
+
+## Bundle without a PWA plugin
+
+```sh
+pnpm add -D esbuild
+pnpm exec esbuild src/sw.ts --bundle --format=iife --target=es2022 --outfile=public/sw.js
+```
+
+```ts
+await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+// Wait for activation in your application's bounded setup flow, then start the client.
+const stop = client.start();
+```
+
+The repository examples include this build flow. A worker served from `/sw.js` can cover `/`. For a nested application, pass the same scope to registration and `createPushClient({ serviceWorkerScope })`. The page must be within that scope. Do not cache configuration responses; public-key rotation depends on fresh config.

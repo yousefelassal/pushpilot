@@ -1,0 +1,10 @@
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { createDemo } from '@pushpilot/example-shared/server';
+const demo = createDemo(process.env);
+const app = new Hono();
+app.post('/api/push', (context) => demo.handler(context.req.raw));
+app.post('/api/notify', (context) => demo.notify(context.req.raw));
+app.use('*', serveStatic({ root: './public' }));
+serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) });

@@ -1,0 +1,63 @@
+---
+title: Authentication and endpoint secrecy
+---
+
+A push endpoint is a capability URL. Never print it, auth secrets, or a VAPID private key in logs. Disable request-body logging on the push route. Delivery reports contain only an input index and `endpointHash` for correlation. Hashes are not database identifiers.
+
+Authenticate in both callbacks before a database write. Scope deletion by the authenticated account and endpoint. A supplied `previousEndpoint` is untrusted cleanup data, not permission to delete another user's row. A submitted public key matching config does not prove ownership of a browser subscription.
+
+Use a unique endpoint constraint. Repeated subscribe requests must be idempotent. For shared devices, decide explicitly how your auth system authorizes an endpoint transfer between accounts. Blind reassignment lets someone who knows another endpoint replace its owner.
+
+## Sign out and switch accounts
+
+Call detach while the old session still exists. Check its final state before ending that session.
+
+```ts
+const result = await client.detach();
+if (result.status !== 'unsubscribed') {
+	showRetryMessage();
+	return;
+}
+await applicationSignOut();
+```
+
+The two application functions are your UI and auth actions. Detach preserves the browser subscription but suppresses background reattachment. After successful sign-in, call `await client.sync()`. Other tabs and concurrent sessions require application-level coordination. The client cannot make logout and database deletion atomic.
+
+## CSRF and origins
+
+The built-in handler rejects a different Origin and accepts only POST JSON. Your session system still needs its usual CSRF protection, rate limit, and trusted proxy configuration. Origin reconstruction must use trusted deployment settings rather than arbitrary forwarded headers.
+
+For a trusted frontend on a separate origin, put a CORS and CSRF wrapper before the handler. The wrapper validates an exact allowlist, handles OPTIONS, and adds the matching allow-origin and credentials response headers. The library's handler still rejects cross-origin Origin headers, so after the wrapper verifies the original Origin, pass a cloned Request with that header removed. Keep the original Origin check in the wrapper and authenticate both callbacks. Do not remove Origin in generic middleware without validation.
+
+```ts
+const trustedFrontend = 'https://app.example.com';
+async function crossOriginPush(request: Request): Promise<Response> {
+	if (request.headers.get('origin') !== trustedFrontend)
+		return new Response(null, { status: 403 });
+	const headers = new Headers(request.headers);
+	headers.delete('origin');
+	// verifyCsrf checks your session-bound token before any mutation.
+	if (request.method !== 'OPTIONS' && !(await verifyCsrf(request)))
+		return new Response(null, { status: 403 });
+	const response =
+		request.method === 'OPTIONS'
+			? new Response(null, { status: 204 })
+			: await handler(new Request(request, { headers }));
+	const result = new Response(response.body, response);
+	result.headers.set('access-control-allow-origin', trustedFrontend);
+	result.headers.set('access-control-allow-credentials', 'true');
+	result.headers.set('access-control-allow-methods', 'POST');
+	result.headers.set(
+		'access-control-allow-headers',
+		'content-type,x-csrf-token',
+	);
+	result.headers.append('vary', 'Origin');
+	return result;
+}
+```
+
+`handler` and `verifyCsrf` are application-defined. The CSRF verifier must not consume the JSON body. A cross-origin client fetch needs `credentials: 'include'` and its CSRF header. Cookie SameSite and Secure settings remain application policy.
+
+## Custom push services
+
+`allowPushHosts: ['push.example.com']` adds a hostname. Wildcards match proper subdomains at a dot boundary. HTTPS, default port, no credentials, valid keys, and no redirects are still required. The `'any'` escape hatch does not prevent DNS rebinding. Use trusted inputs and network egress controls when allowing arbitrary hosts.

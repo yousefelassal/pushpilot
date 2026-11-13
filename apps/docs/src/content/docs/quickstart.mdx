@@ -1,0 +1,69 @@
+---
+title: Send your first notification
+description: Run an authenticated local example and receive a visible Web Push notification.
+---
+
+We will run a local app, subscribe this browser, and send a notification to it. Use Node 22 or later and pnpm 10. Desktop localhost works as a secure context. A phone needs HTTPS.
+
+## Run an example
+
+Clone the repository and install its workspace dependencies. Build the library first.
+
+```sh
+pnpm install
+pnpm build
+pnpm --filter @pushpilot/example-hono exec pushpilot keygen
+```
+
+Copy the generated keys into your shell environment. Set a contact subject and a demo password that you choose.
+
+```sh
+export VAPID_PUBLIC_KEY='your-generated-public-key'
+export VAPID_PRIVATE_KEY='your-generated-private-key'
+export VAPID_SUBJECT='mailto:you@example.com'
+export DEMO_SECRET='a-long-random-local-demo-password'
+pnpm --filter @pushpilot/example-hono dev
+```
+
+Open `http://localhost:3000`. Enter the same demo password, then click **Enable notifications**. Accept the browser permission prompt. Wait for the status to read `subscribed`, then click **Send test notification**. A notification titled **Hello from pushpilot** appears.
+
+The examples keep subscriptions in memory and accept one local demo password. Restarting the server clears subscriptions. Do not deploy this authentication or storage design as a production application.
+
+## Add the library to your application
+
+```sh
+pnpm add pushpilot
+pnpm exec pushpilot keygen
+```
+
+Create a server instance with your secrets. Missing or malformed keys produce a configuration error without printing their values.
+
+```ts
+import { createPush } from 'pushpilot/server';
+
+export const push = createPush({
+	vapid: {
+		publicKey: process.env.VAPID_PUBLIC_KEY,
+		privateKey: process.env.VAPID_PRIVATE_KEY,
+		subject: process.env.VAPID_SUBJECT,
+	},
+});
+```
+
+Mount `push.handler(callbacks)` at `/api/push`. Your callbacks authenticate requests and write your database. [Storage recipes](/recipes/storage/) contain the upsert, replacement, and pruning patterns. [Framework recipes](/recipes/frameworks/) show the mount for each framework.
+
+Build and register your [service worker](/recipes/service-worker/) before starting the client. The library discovers an existing registration and never installs another worker.
+
+```ts
+import { createPushClient } from 'pushpilot/client';
+
+export const client = createPushClient();
+const stop = client.start();
+client.listen(() => console.log(client.getSnapshot().status));
+// In the enable button's click handler:
+button.addEventListener('click', () => void client.enable());
+// On teardown:
+stop();
+```
+
+Request permission directly from a click. Do not call `enable()` automatically on page load. [React](/reference/react/) uses the same client instance.

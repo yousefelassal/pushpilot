@@ -1,0 +1,16 @@
+{
+	"name": "@pushpilot/example-astro",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "node ../shared/build.mjs && astro build",
+		"dev": "node ../shared/build.mjs && astro dev --port 3000",
+		"start": "node dist/server/entry.mjs"
+	},
+	"dependencies": {
+		"@pushpilot/example-shared": "workspace:*",
+		"astro": "5.18.2",
+		"@astrojs/node": "9.5.1",
+		"pushpilot": "workspace:*"
+	}
+}

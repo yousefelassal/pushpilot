@@ -1,0 +1,40 @@
+---
+title: React hook
+---
+
+`usePush` from `pushpilot/react` takes a shared client and returns `PushState`. It uses `useSyncExternalStore` and starts the client in an effect. React 18 and 19 are supported.
+
+```tsx
+'use client';
+import { createPushClient } from 'pushpilot/client';
+import { usePush } from 'pushpilot/react';
+
+const client = createPushClient();
+
+export function Notifications() {
+	const state = usePush(client);
+	if (state.status === 'needs-install')
+		return <p>Add this site to your Home Screen to receive notifications.</p>;
+	if (state.status === 'denied')
+		return <p>Allow notifications in your browser settings.</p>;
+	if (state.status === 'unknown' || state.status === 'unsupported') return null;
+	if (state.status === 'error')
+		return <button onClick={() => void client.sync()}>Retry setup</button>;
+	if (state.status === 'subscribed')
+		return (
+			<button onClick={() => void client.disable()}>
+				Disable notifications
+			</button>
+		);
+	return (
+		<button
+			disabled={state.status !== 'unsubscribed'}
+			onClick={() => void client.enable()}
+		>
+			Enable notifications
+		</button>
+	);
+}
+```
+
+Create the client outside the component. Remounting then preserves reconciliation state without creating extra service-worker registrations. The server snapshot is `unknown` and never touches `window`.

@@ -1,0 +1,22 @@
+{
+	"name": "@pushpilot/example-next",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "node ../shared/build.mjs && next build",
+		"dev": "node ../shared/build.mjs && next dev --port 3000",
+		"start": "next start --port 3000"
+	},
+	"dependencies": {
+		"@pushpilot/example-shared": "workspace:*",
+		"next": "15.5.29",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"pushpilot": "workspace:*"
+	},
+	"devDependencies": {
+		"typescript": "5.9.3",
+		"@types/react": "19.2.2",
+		"@types/node": "22.19.1"
+	}
+}

@@ -1,0 +1,37 @@
+---
+title: Browser client
+---
+
+`createPushClient` from `pushpilot/client` creates an SSR-safe store. Import and construction do not access browser globals.
+
+```ts
+const client = createPushClient({
+	endpoint: '/api/push',
+	serviceWorkerScope: '/',
+	fetch: customFetch,
+});
+const stop = client.start();
+const unlisten = client.listen(() => render(client.getSnapshot()));
+```
+
+All options are optional. Fetch defaults to credentials for the same origin and no-store requests. Custom fetch can add CSRF or authorization headers. It must preserve the supplied body, method, and cache settings.
+
+`start()` prefetches configuration and discovers an already registered service worker. It returns a reference-counted cleanup function. `listen` subscribes to state changes without starting the client. Snapshots keep their reference until state changes. `getServerSnapshot()` always returns the same frozen `unknown` snapshot.
+
+| State           | Meaning                                                   |
+| --------------- | --------------------------------------------------------- |
+| `unknown`       | SSR, not started, or initialization pending               |
+| `unsupported`   | An API is missing, context is insecure, or iOS is too old |
+| `needs-install` | Install this iOS or iPadOS site on the Home Screen        |
+| `denied`        | Browser permission is blocked                             |
+| `unsubscribed`  | Ready to enable, or explicitly detached                   |
+| `enabling`      | Subscription operation underway                           |
+| `disabling`     | Removal operation underway                                |
+| `subscribed`    | Current browser subscription was reconciled successfully  |
+| `error`         | The `error.code` identifies the failed operation          |
+
+Error codes are `network`, `server`, `config`, `service-worker`, `push-service`, and `not-ready`. A server error also includes its HTTP `status`. The client does not display an arbitrary server response body as trusted copy.
+
+`enable()` requests permission directly from a user gesture, creates or replaces a browser subscription, and posts it. Calling it before initialization is ready returns `not-ready` without a prompt. `disable()` deletes the server row before unsubscribing the browser. `detach()` deletes the server row while preserving the browser subscription and suppresses automatic reattachment. `sync()` refreshes configuration and reconciles, including after sign-in or an account switch. Each action resolves its final `PushState` instead of rejecting.
+
+The client stores no subscription ID or account identifier in persistent browser storage. It posts a successful current subscription once per page load. A mismatched or unknown browser key is replaced under the current key, with old-endpoint cleanup data. Config races are retried once, then become an error.

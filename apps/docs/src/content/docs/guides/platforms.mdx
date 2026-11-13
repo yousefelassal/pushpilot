@@ -1,0 +1,29 @@
+---
+title: Runtime and browser support
+---
+
+The server uses WebCrypto, fetch, URL, TextEncoder, AbortController, and Web Streams. Node 22+ is the supported Node floor because the encryption dependency requires it. Bun, Deno, and Cloudflare Workers use their standard Web APIs. The CLI is Node-only.
+
+Deno can import `npm:pushpilot/server` and needs network permission for delivery. A Bun server can pass its Request directly to the handler. A Node HTTP server needs its framework's conversion between Node HTTP objects and Web Request/Response; the library exports no Node adapter. The Hono Node example supplies that conversion.
+
+```ts
+// Bun, using an application-defined handler:
+Bun.serve({ fetch: handler });
+```
+
+```ts
+// Deno, using an application-defined handler:
+Deno.serve(handler);
+```
+
+Workers have plan-specific CPU, subrequest, and background-lifetime limits. Encryption costs work for every recipient, and a retry consumes another request. Keep batches within your current limits and use a durable queue rather than treating `waitUntil` as an unbounded broadcast service.
+
+## iOS and iPadOS
+
+Web Push starts at iOS and iPadOS 16.4 for installed Home Screen web apps. A browser tab receives `needs-install` before missing-API checks. iPadOS desktop mode can identify as MacIntel; touch-point detection helps recognize it. When the version is masked, the client gives installation guidance conservatively and checks features again after installation.
+
+Show installation instructions instead of a broken permission button. After installation, ask permission from an explicit user gesture. Platform notification settings can still block display. Actions, badge, image, and requireInteraction are optional presentation and vary by browser.
+
+Every push must attempt visible display. Do not add another push listener that silently consumes the event. Treat `pushsubscriptionchange` as unreliable. The page's reconciliation path repairs missed subscription changes and database resets.
+
+Desktop localhost works as a secure context. For a physical device, use HTTPS and a manifest with production icons, name, start URL, and standalone display mode.

@@ -1,0 +1,71 @@
+---
+title: Server and HTTP reference
+---
+
+`pushpilot/server` exports `createPush`, `PushpilotError`, and the server types. The package has no root runtime export.
+
+```ts
+const push = createPush({
+	vapid: { publicKey, privateKey, subject, previous: oldKeyPairs },
+	allowPushHosts: ['push.example.com'],
+	fetch: customFetch,
+});
+const report = await push.send(subscriptions, notification, {
+	ttl: 86400,
+	urgency: 'normal',
+});
+const handler = push.handler({ onSubscribe, onUnsubscribe });
+```
+
+Only `vapid` is required. `publicKey` is a base64url 65-byte P-256 point. `privateKey` is a base64url 32-byte scalar. `subject` is a contact `mailto:` address or HTTPS URL. `previous` contains retained old pairs. `allowPushHosts` adds exact hosts or `*.suffix` patterns. The explicit value `'any'` disables host matching and needs caller-controlled inputs plus network egress controls. The server never follows endpoint redirects.
+
+A subscription record has four required strings: `endpoint`, `p256dh`, `auth`, and `keyId`. The subscribe handler supplies this shape. The application stores it and supplies records to `send`. `keyId` is a fingerprint of the VAPID public key. Do not replace it in the database to simulate rotation.
+
+A notification requires a nonempty `title`. Optional fields are `body`, `url`, `icon`, `badge`, `image`, `tag`, `renotify`, `requireInteraction`, `silent`, `actions`, and JSON-object `data`. Each action has `action`, `title`, and optional `url`. `renotify: true` requires a nonempty tag. `silent: true` suppresses sound, not display. URLs are paths or HTTPS URLs. Clicks remain same-origin.
+
+The complete serialized payload is limited to 3993 UTF-8 bytes. TTL is an integer from 1 to 2419200 seconds, default 86400. Urgency is `very-low`, `low`, `normal`, or `high`, default `normal`. Invalid global input rejects before delivery. Per-subscription problems become results.
+
+## Delivery results
+
+`report.results` has one entry per input, in input order. Each entry has `index`, `endpointHash`, `attempts`, `needsResubscribe`, `status`, and `httpStatus`. It never contains an endpoint, subscription key, provider response text, or input record.
+
+| Status     | Meaning                                            | Storage action                  |
+| ---------- | -------------------------------------------------- | ------------------------------- |
+| `accepted` | Any 2xx from the push service                      | Keep                            |
+| `gone`     | 404 or 410                                         | Delete the indexed row          |
+| `outdated` | Unknown VAPID keyId, not sent                      | Wait for browser resubscription |
+| `failed`   | Invalid record, configuration, or delivery failure | Keep and inspect `reason`       |
+
+A retained old key can still send. Its result has `needsResubscribe: true`. An accepted notification has reached the push service, not necessarily the browser.
+
+A failed result has `reason` and `retryable`. Only `rate-limited`, `server-error`, and `network` have `retryable: true`. Other reasons are `invalid-subscription`, `configuration`, `not-attempted`, `bad-request`, `payload-too-large`, `redirect`, and `unexpected`. `httpStatus` is null when no response was received or no send occurred. `attempts` is 0, 1, or 2.
+
+The engine uses six slots per call. It retries once on 429, 5xx, and network errors. `Retry-After` is capped at two seconds. Every response body is drained or cancelled. A 401 or 403 stops queued work only for the same push-service origin and VAPID key, while in-flight requests finish. It never makes a subscription `gone`.
+
+## HTTP endpoint
+
+Mount one POST handler, conventionally `/api/push`. The action selects the operation.
+
+```json
+{ "action": "config" }
+```
+
+Config returns 200 with `{ "publicKey": "...", "keyId": "..." }`.
+
+```json
+{
+	"action": "subscribe",
+	"publicKey": "current VAPID public key",
+	"subscription": {
+		"endpoint": "https://push-service.example/secret",
+		"keys": { "p256dh": "...", "auth": "..." }
+	},
+	"previousEndpoint": "https://old-service.example/secret"
+}
+```
+
+`previousEndpoint` is optional. Subscribe invokes `onSubscribe({ request, subscription, previousEndpoint })`. Unsubscribe accepts `{ "action": "unsubscribe", "endpoint": "..." }` and invokes `onUnsubscribe({ request, endpoint })`. Both callbacks return void for a 204 response, or a 4xx/5xx `Response` to refuse the operation. The request body has already been consumed. Unknown callback exceptions propagate to the framework.
+
+All generated responses are `Cache-Control: no-store`. JSON requests require `Content-Type: application/json` and are limited to 16 KiB even when streamed. Non-POST requests receive 405. A different Origin receives 403. A stale subscribe public key receives 409 before callbacks. The public route does not send notifications.
+
+`PushpilotError.code` is `invalid-config`, `invalid-notification`, or `payload-too-large`. Error messages identify fields without including secrets.

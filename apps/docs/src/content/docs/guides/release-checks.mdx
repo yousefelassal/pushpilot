@@ -1,0 +1,24 @@
+---
+title: Release verification
+---
+
+Package builds, type checks, unit tests, runtime smoke tests, and docs builds run locally and in CI. Automated WebKit is not proof that Apple Web Push works on a real installed app.
+
+Before a public release, record device, OS, browser version, date, and result for each check below. These live-device checks remain pending until a human or authorized device session records them. Do not interpret a checked build as a completed device test.
+
+- Desktop Chrome or Edge accepts permission and displays a background notification.
+- Firefox accepts permission and displays a background notification.
+- macOS Safari displays a notification from a real push service.
+- Installed iOS 16.4+ app displays and opens a notification.
+- Installed iPadOS app is detected correctly and displays a notification.
+- An iOS browser tab shows installation guidance.
+- Empty and malformed payloads show the fallback.
+- A same-origin click focuses an exact-URL tab or opens a new one.
+- A cross-origin click falls back to the application scope.
+- Gradual key rotation delivers through an old key and replaces it on reopen.
+- Emergency key removal reports outdated recipients until reopen.
+- Detach before logout prevents notifications from the previous account.
+- An account switch does not expose another account's notification data.
+- Denied permission produces a settings message without repeated prompts.
+
+Keep test subscriptions and VAPID secrets out of committed fixtures. Publishing and deployment require a separate release decision.

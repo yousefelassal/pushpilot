@@ -1,0 +1,33 @@
+---
+title: Service worker and CLI
+---
+
+`handlePush` from `pushpilot/sw` installs push and notification-click listeners at worker script top level.
+
+```ts
+import { handlePush } from 'pushpilot/sw';
+handlePush({
+	fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
+	icon: '/icon-192.png',
+	badge: '/badge.png',
+});
+```
+
+`fallback` is required and needs a nonempty title. `icon` and `badge` are optional defaults. Every push calls `waitUntil` synchronously and attempts to show a notification. Invalid payloads and unknown versions use the fallback. If a rich notification is rejected, the helper attempts the minimal fallback once.
+
+Clicks focus an exact-URL window or open a new one. Cross-origin or invalid targets fall back to the worker scope. The helper never navigates an unrelated existing tab or changes worker activation and caching policy.
+
+## CLI
+
+```text
+pushpilot keygen [--json]
+pushpilot doctor [--env-file <path>] [--url <handler-url>] [--json]
+pushpilot --help
+pushpilot --version
+```
+
+Keygen writes the new public and private keys to stdout as environment assignments. `--json` returns `{ publicKey, privateKey, keyId }`. It writes no files. Keep its output out of shared logs.
+
+Doctor reads `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`. An explicit env file supplies defaults. Process environment takes precedence. No file is loaded automatically. Doctor validates key encoding, lengths, pairing, contact subject, and keyId. `--url` probes the handler's config action without sending keys or subscription data. It checks JSON, matching public key and keyId, and no-store.
+
+Doctor exits 0 on success, 1 on failed checks or execution, and 2 on invalid arguments. JSON output is `{ ok, checks: [{ name, ok, message }], keyId }`. Doctor never prints keys or raw exception text.

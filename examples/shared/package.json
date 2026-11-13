@@ -1,0 +1,14 @@
+{
+	"name": "@pushpilot/example-shared",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./server": "./server.ts"
+	},
+	"dependencies": {
+		"pushpilot": "workspace:*"
+	},
+	"devDependencies": {
+		"esbuild": "0.25.12"
+	}
+}

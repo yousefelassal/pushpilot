@@ -1,0 +1,12 @@
+---
+title: Web Push on your infrastructure
+description: A sender, browser client, React hook, service worker helper, and VAPID CLI.
+---
+
+pushpilot handles the Web Push protocol. You keep authentication, your database, recipient selection, and deployment.
+
+The server encrypts notifications and reports which subscriptions are expired. A standard `Request` and `Response` handler calls your `onSubscribe` and `onUnsubscribe` callbacks. The browser client handles permission and subscription state. The service worker always attempts to show a notification, including a fallback for malformed payloads.
+
+[Send your first notification](/quickstart/) or use the [framework recipes](/recipes/frameworks/).
+
+The server package requires Node 22 or later, Bun, Deno, or Cloudflare Workers with WebCrypto and fetch. It includes no database adapter, hosted backend, migration, queue, or telemetry. React is optional.
