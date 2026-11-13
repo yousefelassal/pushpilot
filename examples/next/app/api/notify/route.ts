@@ -1,2 +1,3 @@
-import { demo } from '../../demo';
-export const POST = demo.notify;
+import { notify } from '../../push.server';
+
+export const POST = notify;

@@ -3,14 +3,17 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "node ../shared/build.mjs && astro build",
-		"dev": "node ../shared/build.mjs && astro dev --port 3000",
-		"start": "node dist/server/entry.mjs"
+		"dev": "pnpm sw && astro dev --port 3000",
+		"build": "pnpm sw && astro build",
+		"start": "node dist/server/entry.mjs",
+		"sw": "esbuild src/sw.ts --bundle --format=iife --outfile=public/sw.js"
 	},
 	"dependencies": {
-		"@pushpilot/example-shared": "workspace:*",
 		"astro": "5.18.2",
 		"@astrojs/node": "9.5.1",
 		"pushpilot": "workspace:*"
+	},
+	"devDependencies": {
+		"esbuild": "0.27.0"
 	}
 }

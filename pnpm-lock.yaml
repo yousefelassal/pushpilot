@@ -77,24 +77,22 @@ importers:
       '@astrojs/node':
         specifier: 9.5.1
         version: 9.5.1(astro@5.18.2(@types/node@22.19.1)(jiti@2.7.0)(rollup@4.68.3)(tsx@4.20.6)(typescript@5.9.3))
-      '@pushpilot/example-shared':
-        specifier: workspace:*
-        version: link:../shared
       astro:
         specifier: 5.18.2
         version: 5.18.2(@types/node@22.19.1)(jiti@2.7.0)(rollup@4.68.3)(tsx@4.20.6)(typescript@5.9.3)
       pushpilot:
         specifier: workspace:*
         version: link:../../packages/pushpilot
+    devDependencies:
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
 
   examples/hono:
     dependencies:
       '@hono/node-server':
         specifier: 2.1.8
         version: 2.1.8(hono@4.13.18)
-      '@pushpilot/example-shared':
-        specifier: workspace:*
-        version: link:../shared
       hono:
         specifier: 4.13.18
         version: 4.13.18
@@ -102,15 +100,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/pushpilot
     devDependencies:
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
       tsx:
         specifier: 4.20.6
         version: 4.20.6
 
   examples/next:
     dependencies:
-      '@pushpilot/example-shared':
-        specifier: workspace:*
-        version: link:../shared
       next:
         specifier: 15.5.29
         version: 15.5.29(@playwright/test@1.56.1)(@types/node@22.19.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -130,15 +128,15 @@ importers:
       '@types/react':
         specifier: 19.2.2
         version: 19.2.2
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
 
   examples/react-router:
     dependencies:
-      '@pushpilot/example-shared':
-        specifier: workspace:*
-        version: link:../shared
       '@react-router/node':
         specifier: 7.18.5
         version: 7.18.5(react-router@7.18.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(typescript@5.9.3)
@@ -173,22 +171,15 @@ importers:
       '@types/react-dom':
         specifier: 19.2.2
         version: 19.2.2(@types/react@19.2.2)
+      esbuild:
+        specifier: 0.27.0
+        version: 0.27.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
       vite:
         specifier: 6.4.1
         version: 6.4.1(@types/node@22.19.1)(jiti@2.7.0)(tsx@4.20.6)
-
-  examples/shared:
-    dependencies:
-      pushpilot:
-        specifier: workspace:*
-        version: link:../../packages/pushpilot
-    devDependencies:
-      esbuild:
-        specifier: 0.25.12
-        version: 0.25.12
 
   packages/pushpilot:
     dependencies:

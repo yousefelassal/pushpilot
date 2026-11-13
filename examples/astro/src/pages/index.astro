@@ -1,3 +1,57 @@
 ---
+export const prerender = false;
+
+if (!Astro.cookies.has('demo_user'))
+  Astro.cookies.set('demo_user', crypto.randomUUID(), {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+  });
 ---
-<html lang="en"><head><title>pushpilot local example</title><meta name="viewport" content="width=device-width" /><link rel="manifest" href="/manifest.webmanifest" /></head><body><main><h1>pushpilot local example</h1><p>Local demo only. Enter DEMO_SECRET below.</p><label>Demo password <input id="password" type="password" autocomplete="off" /></label><p id="status">Starting</p><button id="enable" disabled>Enable notifications</button><button id="disable" disabled>Disable notifications</button><button id="send" disabled>Send test notification</button><script is:inline type="module" src="/browser.js"></script></main></body></html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>pushpilot Astro example</title>
+  </head>
+  <body>
+    <main>
+      <h1>pushpilot Astro example</h1>
+      <p>Subscriptions live in server memory and disappear on restart.</p>
+      <p id="status">Starting</p>
+      <button id="enable" disabled>Enable notifications</button>
+      <button id="disable" disabled>Disable notifications</button>
+      <button id="send" disabled>Send test notification</button>
+    </main>
+
+    <script>
+      import { createPushClient } from 'pushpilot/client';
+
+      const status = document.querySelector<HTMLElement>('#status')!;
+      const enable = document.querySelector<HTMLButtonElement>('#enable')!;
+      const disable = document.querySelector<HTMLButtonElement>('#disable')!;
+      const send = document.querySelector<HTMLButtonElement>('#send')!;
+
+      const client = createPushClient();
+
+      client.listen(() => {
+        const state = client.getSnapshot();
+        status.textContent = state.status;
+        enable.disabled = !['unsubscribed', 'error'].includes(state.status);
+        disable.disabled = state.status !== 'subscribed';
+        send.disabled = state.status !== 'subscribed';
+      });
+
+      enable.addEventListener('click', () => void client.enable());
+      disable.addEventListener('click', () => void client.disable());
+      send.addEventListener('click', async () => {
+        const response = await fetch('/api/notify', { method: 'POST' });
+        status.textContent = response.ok ? 'Test sent' : 'Send failed';
+      });
+
+      await navigator.serviceWorker.register('/sw.js');
+      client.start();
+    </script>
+  </body>
+</html>

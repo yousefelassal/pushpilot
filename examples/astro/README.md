@@ -1,4 +1,6 @@
-# astro example
+# Astro example
+
+An Astro example. `src/pages/index.astro` sets the identity cookie with `Astro.cookies` and drives the UI from a `<script>` using `pushpilot/client`. `src/pages/api/push.ts` and `api/notify.ts` are on-demand endpoints.
 
 Run this from the repository root with Node 22+ and pnpm 10.
 
@@ -9,18 +11,18 @@ pnpm --filter @pushpilot/example-astro exec pushpilot keygen
 export VAPID_PUBLIC_KEY='your-generated-public-key'
 export VAPID_PRIVATE_KEY='your-generated-private-key'
 export VAPID_SUBJECT='mailto:you@example.com'
-export DEMO_SECRET='a-long-random-local-demo-password'
 pnpm --filter @pushpilot/example-astro dev
 ```
 
-Open http://localhost:3000 and enter DEMO_SECRET in the password field. Wait for setup, click Enable notifications, grant permission, and click Send test notification. The server sends only to subscriptions created in this local process.
+Open http://localhost:3000, click Enable notifications, grant permission, then click Send test notification. `dev` and `build` first bundle the service worker to `public/sw.js`, which is generated and gitignored.
 
-This is a local demo. It uses one password and in-memory subscription storage. It is not a production identity system. The password remains in the page's input and request headers, never localStorage. Restarting the server clears subscriptions. Use your own authenticated session, ownership checks, database, rate limit, and CSRF protection in production.
+`src/push.server.ts` holds the handler, the store, and the test send. `src/sw.ts` is bundled to `public/sw.js`. Build with `pnpm --filter @pushpilot/example-astro build`, then run `start`.
 
-`../shared/server.ts` owns the demo sender and callback logic. `../shared/browser.ts` owns the browser UI. `../shared/build.mjs` bundles `public/browser.js` and `public/sw.js`. Do not commit generated files. The app registers its worker before starting the push client.
+The standalone adapter allowlists `http://localhost:3000` and `http://127.0.0.1:3000` in `astro.config.mjs` so it preserves the request origin. Set `security.allowedDomains` to your deployment origin before deploying.
 
-Desktop localhost is a secure context. Test phones through HTTPS. iOS and iPadOS need installation on the Home Screen. The sample manifest has no app icons; add your own production icons before using it as an installable PWA.
+## Before production
 
-For a production build, run `pnpm --filter @pushpilot/example-astro build`, then `pnpm --filter @pushpilot/example-astro start`. Environment variables must remain available to the server. Never expose the private VAPID key to frontend bundles.
-
-The standalone adapter allowlists `http://localhost:3000` and `http://127.0.0.1:3000` so it preserves the request origin and port. Set explicit `security.allowedDomains` for your deployment origin before deploying. Do not disable Origin checks to compensate for an untrusted Host header.
+- The `demo_user` cookie is an unauthenticated random id. Replace it with your real session.
+- Subscriptions live in an in-memory `Map`. Use a database and delete rows when `send` reports `gone`.
+- Add `Secure` to the cookie, rate-limit the send action, and keep VAPID keys out of client bundles.
+- Test phones over HTTPS. iOS and iPadOS need the app installed to the Home Screen, which needs a web manifest with icons.

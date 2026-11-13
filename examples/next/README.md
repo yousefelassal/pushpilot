@@ -1,4 +1,6 @@
-# next example
+# Next.js example
+
+An App Router example. A server component page renders a `'use client'` button built on `usePush` from `pushpilot/react`. `middleware.ts` sets the identity cookie, `app/api/push/route.ts` exports the handler, and `app/api/notify/route.ts` sends the test notification.
 
 Run this from the repository root with Node 22+ and pnpm 10.
 
@@ -9,16 +11,16 @@ pnpm --filter @pushpilot/example-next exec pushpilot keygen
 export VAPID_PUBLIC_KEY='your-generated-public-key'
 export VAPID_PRIVATE_KEY='your-generated-private-key'
 export VAPID_SUBJECT='mailto:you@example.com'
-export DEMO_SECRET='a-long-random-local-demo-password'
 pnpm --filter @pushpilot/example-next dev
 ```
 
-Open http://localhost:3000 and enter DEMO_SECRET in the password field. Wait for setup, click Enable notifications, grant permission, and click Send test notification. The server sends only to subscriptions created in this local process.
+Open http://localhost:3000, click Enable notifications, grant permission, then click Send test notification. `dev` and `build` first bundle the service worker to `public/sw.js`, which is generated and gitignored.
 
-This is a local demo. It uses one password and in-memory subscription storage. It is not a production identity system. The password remains in the page's input and request headers, never localStorage. Restarting the server clears subscriptions. Use your own authenticated session, ownership checks, database, rate limit, and CSRF protection in production.
+`app/push.server.ts` holds the handler, the store, and the test send. `app/sw.ts` is bundled to `public/sw.js`. Build with `pnpm --filter @pushpilot/example-next build`, then run `start`.
 
-`../shared/server.ts` owns the demo sender and callback logic. `../shared/browser.ts` owns the browser UI. `../shared/build.mjs` bundles `public/browser.js` and `public/sw.js`. Do not commit generated files. The app registers its worker before starting the push client.
+## Before production
 
-Desktop localhost is a secure context. Test phones through HTTPS. iOS and iPadOS need installation on the Home Screen. The sample manifest has no app icons; add your own production icons before using it as an installable PWA.
-
-For a production build, run `pnpm --filter @pushpilot/example-next build`, then `pnpm --filter @pushpilot/example-next start`. Environment variables must remain available to the server. Never expose the private VAPID key to frontend bundles.
+- The `demo_user` cookie is an unauthenticated random id. Replace it with your real session.
+- Subscriptions live in an in-memory `Map`. Use a database and delete rows when `send` reports `gone`.
+- Add `Secure` to the cookie, rate-limit the send action, and keep VAPID keys out of client bundles.
+- Test phones over HTTPS. iOS and iPadOS need the app installed to the Home Screen, which needs a web manifest with icons.

@@ -3,12 +3,12 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "node ../shared/build.mjs && react-router build",
-		"dev": "node ../shared/build.mjs && react-router dev --port 3000",
-		"start": "react-router-serve ./build/server/index.js"
+		"dev": "pnpm sw && react-router dev --port 3000",
+		"build": "pnpm sw && react-router build",
+		"start": "react-router-serve ./build/server/index.js",
+		"sw": "esbuild app/sw.ts --bundle --format=iife --outfile=public/sw.js"
 	},
 	"dependencies": {
-		"@pushpilot/example-shared": "workspace:*",
 		"react-router": "7.18.5",
 		"@react-router/node": "7.18.5",
 		"@react-router/serve": "7.18.5",
@@ -23,6 +23,7 @@
 		"typescript": "5.9.3",
 		"@types/react": "19.2.2",
 		"@types/react-dom": "19.2.2",
-		"@types/node": "22.19.1"
+		"@types/node": "22.19.1",
+		"esbuild": "0.27.0"
 	}
 }

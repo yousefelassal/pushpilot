@@ -1,6 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 const execute = promisify(execFile);
 const keys = JSON.parse(
@@ -17,7 +16,6 @@ const env = {
 	VAPID_PUBLIC_KEY: keys.publicKey,
 	VAPID_PRIVATE_KEY: keys.privateKey,
 	VAPID_SUBJECT: 'mailto:test@example.com',
-	DEMO_SECRET: randomUUID(),
 	PORT: '3000',
 	HOST: '127.0.0.1',
 	NEXT_TELEMETRY_DISABLED: '1',
@@ -56,6 +54,18 @@ for (const framework of frameworks.length
 			await new Promise((done) => setTimeout(done, 100));
 		}
 		assert(ready, `${framework} did not start`);
+		const home = await fetch('http://localhost:3000/');
+		const cookie = home.headers.getSetCookie()[0]?.split(';')[0];
+		assert(cookie?.startsWith('demo_user='), `${framework}: no demo cookie`);
+		const callback = (headers) =>
+			fetch('http://localhost:3000/api/push', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', ...headers },
+				body: JSON.stringify({
+					action: 'unsubscribe',
+					endpoint: 'https://fcm.googleapis.com/test',
+				}),
+			});
 		const response = await fetch('http://localhost:3000/api/push', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
@@ -63,43 +73,28 @@ for (const framework of frameworks.length
 		});
 		assert.equal(response.status, 200, framework);
 		assert.equal((await response.json()).publicKey, keys.publicKey);
-		const refusal = await fetch('http://localhost:3000/api/push', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				action: 'unsubscribe',
-				endpoint: 'https://fcm.googleapis.com/test',
-			}),
-		});
-		assert.equal(refusal.status, 401, framework);
-		const allowed = await fetch('http://localhost:3000/api/push', {
-			method: 'POST',
-			headers: {
-				'content-type': 'application/json',
-				authorization: `Bearer ${env.DEMO_SECRET}`,
-			},
-			body: JSON.stringify({
-				action: 'unsubscribe',
-				endpoint: 'https://fcm.googleapis.com/test',
-			}),
-		});
-		assert.equal(allowed.status, 204, framework);
-		const report = await fetch('http://localhost:3000/api/notify', {
-			method: 'POST',
-			headers: {
-				authorization: `Bearer ${env.DEMO_SECRET}`,
-				origin: 'http://localhost:3000',
-				'content-type': 'application/json',
-			},
-		});
+		assert.equal((await callback({})).status, 401, framework);
+		assert.equal((await callback({ cookie })).status, 204, framework);
+		const notify = (headers) =>
+			fetch('http://localhost:3000/api/notify', {
+				method: 'POST',
+				headers: { origin: 'http://localhost:3000', ...headers },
+			});
+		assert.equal((await notify({})).status, 401, framework);
+		const report = await notify({ cookie });
 		assert.equal(
 			report.status,
 			200,
 			`${framework}: ${report.status === 200 ? '' : await report.text()} ${logs}`,
 		);
 		assert.deepEqual(await report.json(), { results: [] });
+		assert.equal(
+			(await notify({ cookie, origin: 'http://evil.example' })).status,
+			403,
+			framework,
+		);
 		console.log(
-			`PASS ${framework} build, live config route, authenticated callbacks, and empty send`,
+			`PASS ${framework} build, live config route, cookie-scoped callbacks, and empty send`,
 		);
 	} finally {
 		if (child.pid) {

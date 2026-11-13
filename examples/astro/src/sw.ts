@@ -1,4 +1,5 @@
 import { handlePush } from 'pushpilot/sw';
+
 handlePush({
 	fallback: {
 		title: 'pushpilot example',

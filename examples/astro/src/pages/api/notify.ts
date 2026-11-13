@@ -1,3 +1,6 @@
 import type { APIRoute } from 'astro';
-import { demo } from '../../demo';
-export const POST: APIRoute = ({ request }) => demo.notify(request);
+import { notify } from '../../push.server';
+
+export const prerender = false;
+
+export const POST: APIRoute = ({ request }) => notify(request);
