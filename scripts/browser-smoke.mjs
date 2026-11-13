@@ -87,9 +87,13 @@ try {
 				).json(),
 			);
 			assert.equal(configuration.publicKey, publicKey);
-			const expectedState = await page.evaluate(() =>
-				Notification.permission === 'denied' ? 'denied' : 'unsubscribed',
-			);
+			// Playwright's Firefox turns its push service off, so the subscription lookup times out.
+			const expectedState =
+				name === 'firefox'
+					? 'error'
+					: await page.evaluate(() =>
+							Notification.permission === 'denied' ? 'denied' : 'unsubscribed',
+						);
 			assert.equal(
 				await page.evaluate(() => window.client.getSnapshot().status),
 				expectedState,

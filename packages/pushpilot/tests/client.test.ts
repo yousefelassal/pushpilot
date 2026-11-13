@@ -225,6 +225,22 @@ describe('browser client', () => {
 		});
 		stop();
 	});
+
+	it('bounds a subscription lookup that never settles to ten seconds', async () => {
+		vi.useFakeTimers();
+		registration.pushManager.getSubscription = () => new Promise(() => {});
+
+		const client = createPushClient({ fetch: fetcher });
+		const stop = client.start();
+		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		expect(client.getSnapshot()).toEqual({
+			status: 'error',
+			error: { code: 'push-service' },
+		});
+		stop();
+	});
 });
 
 it('refreshes configuration once on a stale-key response and then stops', async () => {

@@ -1,7 +1,7 @@
 import { decodeBase64, encodeBase64, keyId } from '../shared/keys.js';
 import { ClientFailure } from './failure.js';
 import { platformState } from './platform.js';
-import { activeRegistration } from './registration.js';
+import { activeRegistration, existingSubscription } from './registration.js';
 import type {
 	PushClient,
 	PushClientOptions,
@@ -190,7 +190,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 		allowCreate: boolean,
 	): Promise<PushSubscription | null> {
 		const { pushManager } = ready.registration;
-		let subscription = await pushManager.getSubscription();
+		let subscription = await existingSubscription(pushManager);
 
 		if (
 			subscription &&
@@ -343,7 +343,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 			registration ??= await activeRegistration(scope);
 			setState({ status: 'disabling' });
 
-			const subscription = await registration.pushManager.getSubscription();
+			const subscription = await existingSubscription(registration.pushManager);
 			const removingEndpoint = subscription?.endpoint ?? postedEndpoint;
 			if (removingEndpoint) {
 				const response = await post({

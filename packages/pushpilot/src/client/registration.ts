@@ -58,3 +58,29 @@ export async function activeRegistration(
 		stop();
 	}
 }
+
+const SUBSCRIPTION_LOOKUP_TIMEOUT_MS = 10_000;
+
+/**
+ * Reads the browser's push subscription, failing with `push-service` after 10
+ * seconds. Firefox never settles `getSubscription()` while its push service is
+ * turned off, which would leave the client in `unknown` forever.
+ */
+export async function existingSubscription(
+	pushManager: PushManager,
+): Promise<PushSubscription | null> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() => reject(new ClientFailure({ code: 'push-service' })),
+			SUBSCRIPTION_LOOKUP_TIMEOUT_MS,
+		);
+	});
+
+	try {
+		return await Promise.race([timeout, pushManager.getSubscription()]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
