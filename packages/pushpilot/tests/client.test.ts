@@ -10,7 +10,13 @@ let responseStatus: number;
 let permission: NotificationPermission;
 let requestPermission: ReturnType<typeof vi.fn>;
 let subscribe: ReturnType<typeof vi.fn>;
-let registration: object;
+let registration: {
+	active: object;
+	pushManager: {
+		getSubscription: () => Promise<unknown>;
+		subscribe: typeof subscribe;
+	};
+};
 let fetcher: ReturnType<typeof vi.fn>;
 let visibilityListeners: Set<() => void>;
 
