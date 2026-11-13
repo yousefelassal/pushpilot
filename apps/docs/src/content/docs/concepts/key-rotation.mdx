@@ -1,0 +1,50 @@
+---
+title: Key rotation
+description: Replace VAPID keys without losing existing subscribers.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+A browser subscription is bound to the VAPID public key it was created under. A server cannot rebind it. Rotation works by keeping the old pair for a grace period while browsers resubscribe.
+
+<Steps>
+
+1. **Generate a new pair**
+
+   ```sh
+   pnpm exec pushpilot keygen
+   ```
+
+2. **Deploy it as current and retain the previous pair**
+
+   ```ts
+   const push = createPush({
+     vapid: {
+       publicKey: env.NEW_PUBLIC_KEY,
+       privateKey: env.NEW_PRIVATE_KEY,
+       subject: env.VAPID_SUBJECT,
+       previous: [
+         { publicKey: env.OLD_PUBLIC_KEY, privateKey: env.OLD_PRIVATE_KEY },
+       ],
+     },
+   });
+   ```
+
+   Old subscriptions are signed with their matching retained key. Their results have `needsResubscribe: true`.
+
+3. **Let browsers resubscribe**
+
+   Returning browsers replace old subscriptions under the current public key. Your callback can remove `previousEndpoint` and write the replacement in one transaction.
+
+4. **Remove the old pair after the grace period**
+
+   Remaining old rows report `outdated` without a network request. Do not rewrite their keyIds.
+
+</Steps>
+
+<Aside type="danger" title="Compromised key">
+  Remove the key immediately. Those browsers must reopen your app before they
+  can receive again, because the server cannot rebind an existing subscription.
+</Aside>
+
+Do not cache the handler's config responses. Public-key rotation depends on fresh config.

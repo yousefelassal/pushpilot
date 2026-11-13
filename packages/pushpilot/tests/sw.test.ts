@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { handlePush } from '../src/sw/index.js';
 let listeners: Map<string, (event: unknown) => void>;
 let show: ReturnType<typeof vi.fn>;
 let open: ReturnType<typeof vi.fn>;
 let focus: ReturnType<typeof vi.fn>;
-let matches: { url: string; focus: () => Promise<unknown> }[];
-let install: typeof import('../src/sw/index.js').handlePush;
+let matches: Array<{ url: string; focus: () => Promise<unknown> }>;
+let install: typeof handlePush;
 
 beforeEach(async () => {
 	vi.resetModules();

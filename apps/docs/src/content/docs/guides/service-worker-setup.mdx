@@ -1,5 +1,6 @@
 ---
-title: Build and register the service worker
+title: Build the service worker
+description: Bundle and register the worker with Vite, Workbox, Serwist, or esbuild.
 ---
 
 The application owns worker registration, activation, and caching. Put `handlePush` at the top level of its worker script.
@@ -8,7 +9,7 @@ The application owns worker registration, activation, and caching. Put `handlePu
 // src/sw.ts
 import { handlePush } from 'pushpilot/sw';
 handlePush({
-	fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
+  fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
 });
 ```
 
@@ -20,20 +21,20 @@ Use injectManifest so your source worker owns the push listeners. There is no pu
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
-	plugins: [
-		VitePWA({
-			strategies: 'injectManifest',
-			srcDir: 'src',
-			filename: 'sw.ts',
-			injectManifest: { injectionPoint: undefined },
-			manifest: {
-				name: 'My app',
-				short_name: 'My app',
-				start_url: '/',
-				display: 'standalone',
-			},
-		}),
-	],
+  plugins: [
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: { injectionPoint: undefined },
+      manifest: {
+        name: 'My app',
+        short_name: 'My app',
+        start_url: '/',
+        display: 'standalone',
+      },
+    }),
+  ],
 });
 ```
 
@@ -47,9 +48,9 @@ Add `handlePush` beside existing precache and fetch handlers. Keep the push endp
 import { registerRoute } from 'workbox-routing';
 import { NetworkOnly } from 'workbox-strategies';
 registerRoute(
-	({ url }) => url.pathname === '/api/push',
-	new NetworkOnly(),
-	'POST',
+  ({ url }) => url.pathname === '/api/push',
+  new NetworkOnly(),
+  'POST',
 );
 ```
 

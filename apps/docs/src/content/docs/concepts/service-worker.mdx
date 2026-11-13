@@ -1,0 +1,45 @@
+---
+title: Service worker
+description: What handlePush does when a push arrives and when a notification is clicked.
+---
+
+import { Aside, LinkCard } from '@astrojs/starlight/components';
+
+The browser wakes your service worker for every push. `handlePush` makes sure it shows a notification.
+
+```ts
+// src/sw.ts
+import { handlePush } from 'pushpilot/sw';
+
+handlePush({
+  fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
+});
+```
+
+Put the call at the top level of the worker script. Your application owns worker registration, activation, and caching.
+
+## On push
+
+- `waitUntil` is called synchronously and a notification is always attempted.
+- Empty, malformed, or unknown-version payloads use your `fallback`.
+- If the browser rejects a rich notification, the helper retries once with the minimal fallback.
+
+<Aside type="caution">
+  Every push must attempt a visible notification. Do not add another push
+  listener that silently consumes the event, or that also calls
+  `showNotification`.
+</Aside>
+
+## On click
+
+Clicks focus a window with the exact URL, or open a new one. Cross-origin or invalid targets fall back to the worker scope. The helper never navigates an unrelated existing tab.
+
+## What it leaves to you
+
+The helper does not change worker activation or caching. Keep the push endpoint out of every cache policy. Treat `pushsubscriptionchange` as unreliable. The page's reconciliation path repairs missed subscription changes and database resets.
+
+<LinkCard
+  title="Build and register the service worker"
+  description="Vite, Workbox, Serwist, or a plain esbuild bundle."
+  href="/guides/service-worker-setup/"
+/>

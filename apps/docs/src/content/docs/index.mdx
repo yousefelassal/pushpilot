@@ -1,12 +1,104 @@
 ---
-title: Web Push on your infrastructure
-description: A sender, browser client, React hook, service worker helper, and VAPID CLI.
+title: pushpilot
+description: Web Push for applications that own their infrastructure.
+template: splash
+hero:
+  tagline: Send Web Push notifications from your own server, database, and auth. pushpilot handles encryption, subscriptions, and the service worker.
+  actions:
+    - text: Get started
+      link: /quickstart/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/yousefelassal/pushpilot
+      icon: external
+      variant: minimal
 ---
 
-pushpilot handles the Web Push protocol. You keep authentication, your database, recipient selection, and deployment.
+import {
+  Tabs,
+  TabItem,
+  Card,
+  CardGrid,
+  LinkCard,
+} from '@astrojs/starlight/components';
 
-The server encrypts notifications and reports which subscriptions are expired. A standard `Request` and `Response` handler calls your `onSubscribe` and `onUnsubscribe` callbacks. The browser client handles permission and subscription state. The service worker always attempts to show a notification, including a fallback for malformed payloads.
+<Tabs syncKey="pkg">
+  <TabItem label="pnpm">```sh pnpm add pushpilot ```</TabItem>
+  <TabItem label="npm">```sh npm install pushpilot ```</TabItem>
+  <TabItem label="yarn">```sh yarn add pushpilot ```</TabItem>
+  <TabItem label="bun">```sh bun add pushpilot ```</TabItem>
+</Tabs>
 
-[Send your first notification](/quickstart/) or use the [framework recipes](/recipes/frameworks/).
+## What you get
 
-The server package requires Node 22 or later, Bun, Deno, or Cloudflare Workers with WebCrypto and fetch. It includes no database adapter, hosted backend, migration, queue, or telemetry. React is optional.
+<CardGrid>
+  <Card title="Bring your own backend" icon="seti:db">
+    No database adapter, hosted service, queue, or telemetry. You keep auth,
+    storage, and recipient selection.
+  </Card>
+  <Card title="Runs anywhere with fetch" icon="rocket">
+    Node 22+, Bun, Deno, and Cloudflare Workers. The handler takes a standard
+    `Request` and returns a `Response`.
+  </Card>
+  <Card title="Honest delivery reports" icon="approve-check">
+    Every recipient gets a result: accepted, gone, outdated, or failed. Prune
+    expired rows without guessing.
+  </Card>
+  <Card title="Safe key rotation" icon="setting">
+    Retain old VAPID keys for a grace period. Returning browsers resubscribe
+    under the current key.
+  </Card>
+  <Card title="Always shows a notification" icon="information">
+    The service worker helper shows a fallback for empty or malformed payloads,
+    so a push is never silent.
+  </Card>
+  <Card title="Optional React hook" icon="puzzle">
+    `usePush` exposes permission and subscription state, including iOS install
+    guidance.
+  </Card>
+</CardGrid>
+
+## How it works
+
+Mount one handler on your server. It receives subscriptions from the browser and calls your callbacks.
+
+```ts
+// server
+import { createPush } from 'pushpilot/server';
+
+export const push = createPush({
+  vapid: {
+    publicKey: process.env.VAPID_PUBLIC_KEY,
+    privateKey: process.env.VAPID_PRIVATE_KEY,
+    subject: process.env.VAPID_SUBJECT,
+  },
+});
+
+export const POST = push.handler({
+  onSubscribe: ({ subscription }) => save(subscription),
+  onUnsubscribe: ({ endpoint }) => remove(endpoint),
+});
+```
+
+Enable notifications from a button click in the browser.
+
+```ts
+// browser
+import { createPushClient } from 'pushpilot/client';
+
+const client = createPushClient();
+client.start();
+button.addEventListener('click', () => void client.enable());
+```
+
+Send to the subscriptions you stored, and delete the ones the push service reports as gone.
+
+```ts
+const report = await push.send(rows, { title: 'New reply', url: '/inbox' });
+```
+
+<LinkCard
+  title="Send your first notification"
+  description="Six steps from install to a visible notification."
+  href="/quickstart/"
+/>

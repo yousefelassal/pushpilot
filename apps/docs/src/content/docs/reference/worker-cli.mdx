@@ -1,5 +1,6 @@
 ---
 title: Service worker and CLI
+description: handlePush options and the pushpilot keygen and doctor commands.
 ---
 
 `handlePush` from `pushpilot/sw` installs push and notification-click listeners at worker script top level.
@@ -7,9 +8,9 @@ title: Service worker and CLI
 ```ts
 import { handlePush } from 'pushpilot/sw';
 handlePush({
-	fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
-	icon: '/icon-192.png',
-	badge: '/badge.png',
+  fallback: { title: 'My app', body: 'You have a new notification.', url: '/' },
+  icon: '/icon-192.png',
+  badge: '/badge.png',
 });
 ```
 

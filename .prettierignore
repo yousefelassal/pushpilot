@@ -8,3 +8,5 @@ SPEC.md
 examples/*/public/
 packages/pushpilot/README.md
 packages/pushpilot/LICENSE
+# Prettier alternates list indentation inside <Steps> on every run.
+apps/docs/src/content/docs/quickstart.mdx

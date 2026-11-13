@@ -1,6 +1,6 @@
 {
 	"name": "pushpilot",
-	"version": "0.1.0",
+	"version": "0.0.0",
 	"description": "Web Push for applications that own their infrastructure.",
 	"type": "module",
 	"license": "MIT",
@@ -57,5 +57,13 @@
 	},
 	"devDependencies": {
 		"react": "19.2.7"
+	},
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"homepage": "https://github.com/yousefelassal/pushpilot#readme",
+	"bugs": {
+		"url": "https://github.com/yousefelassal/pushpilot/issues"
 	}
 }

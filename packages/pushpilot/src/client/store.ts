@@ -1,91 +1,95 @@
 import { decodeBase64, encodeBase64, keyId } from '../shared/keys.js';
+import { ClientFailure } from './failure.js';
+import { platformState } from './platform.js';
+import { activeRegistration } from './registration.js';
 import type {
 	PushClient,
-	PushClientError,
 	PushClientOptions,
 	PushState,
-} from './types.js';
-import { platformState } from './platform.js';
+} from './types/index.js';
+import type { Action, ServerConfig } from './types/internal.js';
 
 const UNKNOWN: PushState = Object.freeze({ status: 'unknown' });
-class ClientFailure extends Error {
-	constructor(readonly error: PushClientError) {
-		super(error.code);
-	}
-}
-type Config = { publicKey: string; keyId: string };
-type Action =
-	| 'initialize'
-	| 'enable'
-	| 'disable'
-	| 'detach'
-	| 'sync'
-	| 'visibility';
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function equalKey(key: ArrayBuffer | null, expected: string): boolean {
 	if (!key) return false;
 	return encodeBase64(new Uint8Array(key)) === expected;
 }
 
-async function activeRegistration(
-	scope: string,
-): Promise<ServiceWorkerRegistration> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	let stop = () => {};
-	let settled = false;
-	const timeout = new Promise<never>((_, reject) => {
-		timer = setTimeout(
-			() => reject(new ClientFailure({ code: 'service-worker' })),
-			10_000,
-		);
-	});
+/** Validates the handler's config response and checks that keyId really fingerprints the key. */
+async function parseServerConfig(response: Response): Promise<ServerConfig> {
 	try {
-		return await Promise.race([
-			timeout,
-			(async () => {
-				const registration =
-					await navigator.serviceWorker.getRegistration(scope);
-				if (settled) throw new ClientFailure({ code: 'service-worker' });
-				if (!registration) throw new ClientFailure({ code: 'service-worker' });
-				if (registration.active) return registration;
-				const worker = registration.installing ?? registration.waiting;
-				if (!worker) throw new ClientFailure({ code: 'service-worker' });
-				await new Promise<void>((resolve, reject) => {
-					const check = () => {
-						if (registration.active || worker.state === 'activated') resolve();
-						else if (worker.state === 'redundant')
-							reject(new ClientFailure({ code: 'service-worker' }));
-					};
-					worker.addEventListener('statechange', check);
-					stop = () => worker.removeEventListener('statechange', check);
-					check();
-				});
-				return registration;
-			})(),
-		]);
+		const value: unknown = await response.json();
+		if (
+			!value ||
+			typeof value !== 'object' ||
+			!('publicKey' in value) ||
+			!('keyId' in value) ||
+			typeof value.publicKey !== 'string' ||
+			typeof value.keyId !== 'string'
+		)
+			throw new Error();
+
+		const bytes = decodeBase64(value.publicKey);
+		if (bytes.byteLength !== 65 || bytes[0] !== 4) throw new Error();
+
+		const normalized = encodeBase64(bytes);
+		if ((await keyId(normalized)) !== value.keyId) throw new Error();
+		return { publicKey: normalized, keyId: value.keyId };
 	} catch {
-		throw new ClientFailure({ code: 'service-worker' });
-	} finally {
-		settled = true;
-		clearTimeout(timer);
-		stop();
+		throw new ClientFailure({ code: 'config' });
 	}
 }
 
+/**
+ * Starts a permission request without throwing. Resolves to `null` when the
+ * browser rejects the request. Must run synchronously inside the user gesture.
+ */
+function requestPermission(): Promise<NotificationPermission | null> {
+	return (
+		Notification.permission === 'default'
+			? Notification.requestPermission()
+			: Promise.resolve(Notification.permission)
+	).catch(() => null);
+}
+
+/**
+ * Creates a browser push controller. It touches no browser API until
+ * `start()` runs, so it is safe to create during server rendering.
+ *
+ * @param options Handler URL, service worker scope, and fetch override.
+ * @returns A {@link PushClient} you can bind to any UI.
+ *
+ * @example
+ * ```ts
+ * import { createPushClient } from 'pushpilot/client';
+ *
+ * const client = createPushClient({ endpoint: '/api/push' });
+ * const stop = client.start();
+ * client.listen(() => render(client.getSnapshot()));
+ * button.onclick = () => client.enable();
+ * ```
+ */
 export function createPushClient(options: PushClientOptions = {}): PushClient {
+	const endpoint = options.endpoint ?? '/api/push';
+	const scope = options.serviceWorkerScope ?? '/';
+
 	let snapshot = UNKNOWN;
 	const listeners = new Set<() => void>();
+
+	// Operations run one at a time; identical operations share a single run.
 	const pending = new Map<Action, Promise<PushState>>();
 	let tail: Promise<unknown> | null = null;
+
 	let references = 0;
 	let initialized = false;
+	// True after detach(): the browser stays subscribed but the server link is removed.
 	let detached = false;
 	let postedEndpoint: string | null = null;
 	let previousEndpoint: string | null = null;
-	let config: Config | null = null;
+	let config: ServerConfig | null = null;
 	let registration: ServiceWorkerRegistration | null = null;
-	const endpoint = options.endpoint ?? '/api/push';
-	const scope = options.serviceWorkerScope ?? '/';
 
 	function setState(next: PushState): PushState {
 		if (JSON.stringify(snapshot) !== JSON.stringify(next)) {
@@ -94,6 +98,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 		}
 		return snapshot;
 	}
+
 	function failed(error: unknown): PushState {
 		return setState({
 			status: 'error',
@@ -101,12 +106,14 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 				error instanceof ClientFailure ? error.error : { code: 'push-service' },
 		});
 	}
+
 	function run(
 		name: Action,
 		work: () => Promise<PushState>,
 	): Promise<PushState> {
 		const existing = pending.get(name);
 		if (existing) return existing;
+
 		const execute = async () => {
 			try {
 				return await work();
@@ -123,6 +130,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 		});
 		return result;
 	}
+
 	async function post(body: object): Promise<Response> {
 		try {
 			return await (options.fetch ?? globalThis.fetch)(endpoint, {
@@ -131,46 +139,35 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 				cache: 'no-store',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(body),
-				signal: AbortSignal.timeout(10_000),
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 			});
 		} catch {
 			throw new ClientFailure({ code: 'network' });
 		}
 	}
+
 	async function discard(response: Response): Promise<void> {
 		try {
 			await response.body?.cancel();
-		} catch {}
+		} catch {
+			// The status is already known; a body that cannot be cancelled changes nothing.
+		}
 	}
-	async function readConfig(): Promise<Config> {
+
+	async function readConfig(): Promise<ServerConfig> {
 		const response = await post({ action: 'config' });
 		if (!response.ok) {
 			await discard(response);
 			throw new ClientFailure({ code: 'server', status: response.status });
 		}
-		try {
-			const value: unknown = await response.json();
-			if (
-				!value ||
-				typeof value !== 'object' ||
-				!('publicKey' in value) ||
-				!('keyId' in value) ||
-				typeof value.publicKey !== 'string' ||
-				typeof value.keyId !== 'string'
-			)
-				throw new Error();
-			const bytes = decodeBase64(value.publicKey);
-			if (bytes.byteLength !== 65 || bytes[0] !== 4) throw new Error();
-			const normalized = encodeBase64(bytes);
-			if ((await keyId(normalized)) !== value.keyId) throw new Error();
-			return { publicKey: normalized, keyId: value.keyId };
-		} catch {
-			throw new ClientFailure({ code: 'config' });
-		}
+		return parseServerConfig(response);
 	}
+
+	/** Returns a terminal state when push is unavailable, or `null` once ready. */
 	async function setup(force = false): Promise<PushState | null> {
 		const platform = platformState();
 		if (platform) return setState(platform);
+
 		if (!registration || !config || force) {
 			const [nextConfig, nextRegistration] = await Promise.all([
 				readConfig(),
@@ -182,6 +179,75 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 		initialized = true;
 		return null;
 	}
+
+	/**
+	 * Returns the browser subscription for the current server key, replacing a
+	 * subscription made under an old key. Creates one only when allowed and
+	 * permission is already granted.
+	 */
+	async function currentSubscription(
+		ready: { registration: ServiceWorkerRegistration; config: ServerConfig },
+		allowCreate: boolean,
+	): Promise<PushSubscription | null> {
+		const { pushManager } = ready.registration;
+		let subscription = await pushManager.getSubscription();
+
+		if (
+			subscription &&
+			!equalKey(
+				subscription.options.applicationServerKey,
+				ready.config.publicKey,
+			)
+		) {
+			// Remember the retired endpoint so the server can delete its record.
+			previousEndpoint ??= subscription.endpoint;
+			if (!(await subscription.unsubscribe()))
+				throw new ClientFailure({ code: 'push-service' });
+			subscription = null;
+			allowCreate = true;
+		}
+
+		if (!subscription && allowCreate && Notification.permission === 'granted') {
+			try {
+				subscription = await pushManager.subscribe({
+					userVisibleOnly: true,
+					applicationServerKey: decodeBase64(ready.config.publicKey),
+				});
+			} catch {
+				throw new ClientFailure({ code: 'push-service' });
+			}
+		}
+		return subscription;
+	}
+
+	/** Sends the subscription to the server. On a stale key, refetches config and retries once. */
+	async function register(
+		subscription: PushSubscription,
+		ready: { config: ServerConfig },
+		raced: boolean,
+	): Promise<PushState | 'stale-key'> {
+		const response = await post({
+			action: 'subscribe',
+			publicKey: ready.config.publicKey,
+			subscription: subscription.toJSON(),
+			...(previousEndpoint && previousEndpoint !== subscription.endpoint
+				? { previousEndpoint }
+				: {}),
+		});
+		await discard(response);
+
+		if (response.status === 409) {
+			if (raced) throw new ClientFailure({ code: 'config' });
+			return 'stale-key';
+		}
+		if (!response.ok)
+			throw new ClientFailure({ code: 'server', status: response.status });
+
+		postedEndpoint = subscription.endpoint;
+		previousEndpoint = null;
+		return setState({ status: 'subscribed' });
+	}
+
 	async function reconcile(
 		force: boolean,
 		allowCreate: boolean,
@@ -189,50 +255,20 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 	): Promise<PushState> {
 		if (!registration || !config)
 			throw new ClientFailure({ code: 'not-ready' });
-		let subscription = await registration.pushManager.getSubscription();
-		if (
-			subscription &&
-			!equalKey(subscription.options.applicationServerKey, config.publicKey)
-		) {
-			previousEndpoint ??= subscription.endpoint;
-			if (!(await subscription.unsubscribe()))
-				throw new ClientFailure({ code: 'push-service' });
-			subscription = null;
-			allowCreate = true;
-		}
-		if (!subscription && allowCreate && Notification.permission === 'granted') {
-			try {
-				subscription = await registration.pushManager.subscribe({
-					userVisibleOnly: true,
-					applicationServerKey: decodeBase64(config.publicKey),
-				});
-			} catch {
-				throw new ClientFailure({ code: 'push-service' });
-			}
-		}
+		const ready = { registration, config };
+
+		const subscription = await currentSubscription(ready, allowCreate);
 		if (!subscription) return setState({ status: 'unsubscribed' });
 		if (!force && postedEndpoint === subscription.endpoint)
 			return setState({ status: 'subscribed' });
-		const response = await post({
-			action: 'subscribe',
-			publicKey: config.publicKey,
-			subscription: subscription.toJSON(),
-			...(previousEndpoint && previousEndpoint !== subscription.endpoint
-				? { previousEndpoint }
-				: {}),
-		});
-		await discard(response);
-		if (response.status === 409) {
-			if (raced) throw new ClientFailure({ code: 'config' });
-			config = await readConfig();
-			return reconcile(true, true, true);
-		}
-		if (!response.ok)
-			throw new ClientFailure({ code: 'server', status: response.status });
-		postedEndpoint = subscription.endpoint;
-		previousEndpoint = null;
-		return setState({ status: 'subscribed' });
+
+		const outcome = await register(subscription, ready, raced);
+		if (outcome !== 'stale-key') return outcome;
+
+		config = await readConfig();
+		return reconcile(true, true, true);
 	}
+
 	function refreshVisibility(): void {
 		if (document.visibilityState !== 'visible') return;
 		void run('visibility', async () => {
@@ -242,6 +278,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 			return (await setup()) ?? reconcile(false, false);
 		});
 	}
+
 	function start(): () => void {
 		references++;
 		if (references === 1 && typeof document !== 'undefined') {
@@ -254,6 +291,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 					: reconcile(false, false);
 			});
 		}
+
 		let stopped = false;
 		return () => {
 			if (stopped) return;
@@ -263,48 +301,48 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 				document.removeEventListener('visibilitychange', refreshVisibility);
 		};
 	}
+
 	function enable(): Promise<PushState> {
 		const existing = pending.get('enable');
 		if (existing) return existing;
+
 		const platform = platformState();
 		if (platform) return Promise.resolve(setState(platform));
 		if (!initialized || !registration || !config)
 			return Promise.resolve(failed(new ClientFailure({ code: 'not-ready' })));
+
+		// The prompt must start synchronously, still inside the click handler's user gesture.
 		let permission: Promise<NotificationPermission | null>;
 		try {
-			permission = (
-				Notification.permission === 'default'
-					? Notification.requestPermission()
-					: Promise.resolve(Notification.permission)
-			).catch(() => null);
+			permission = requestPermission();
 		} catch {
 			return Promise.resolve(
 				failed(new ClientFailure({ code: 'push-service' })),
 			);
 		}
+
 		return run('enable', async () => {
 			setState({ status: 'enabling' });
-			let granted: NotificationPermission | null;
-			try {
-				granted = await permission;
-			} catch {
-				throw new ClientFailure({ code: 'push-service' });
-			}
+			const granted = await permission;
 			if (granted === null) throw new ClientFailure({ code: 'push-service' });
 			if (granted !== 'granted')
 				return setState({
 					status: granted === 'denied' ? 'denied' : 'unsubscribed',
 				});
+
 			detached = false;
 			return reconcile(true, true);
 		});
 	}
+
 	function remove(keepBrowser: boolean): Promise<PushState> {
 		return run(keepBrowser ? 'detach' : 'disable', async () => {
 			const platform = platformState();
 			if (platform && platform.status !== 'denied') return setState(platform);
+
 			registration ??= await activeRegistration(scope);
 			setState({ status: 'disabling' });
+
 			const subscription = await registration.pushManager.getSubscription();
 			const removingEndpoint = subscription?.endpoint ?? postedEndpoint;
 			if (removingEndpoint) {
@@ -315,17 +353,20 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
 				await discard(response);
 				if (!response.ok)
 					throw new ClientFailure({ code: 'server', status: response.status });
+
 				postedEndpoint = null;
 				detached = true;
 				if (!keepBrowser && subscription && !(await subscription.unsubscribe()))
 					throw new ClientFailure({ code: 'push-service' });
 			}
+
 			postedEndpoint = null;
 			previousEndpoint = null;
 			detached = keepBrowser;
 			return setState({ status: 'unsubscribed' });
 		});
 	}
+
 	return {
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => UNKNOWN,

@@ -1,70 +1,149 @@
 # pushpilot
 
-Web Push for applications that own their infrastructure. One package provides a server sender, a `Request -> Response` subscription handler, a browser client, a React hook, a service worker helper, and a VAPID CLI. You own authentication and storage. There are no required database interfaces, migrations, or hosted services.
+Web Push for apps that own their database.
 
-Requires Node 22+, Bun, Deno, or Cloudflare Workers with WebCrypto and fetch. React is optional.
+pushpilot sends Web Push notifications from Node, Bun, Deno, or Cloudflare Workers. It gives you a route handler, a browser client, a React hook, a service worker helper, and a CLI for VAPID keys. You keep your auth and your database: pushpilot calls your code to store subscriptions and tells you which ones to delete after each send.
+
+- **No storage adapters.** Save subscriptions in any database with your own queries.
+- **One route.** A standard `Request -> Response` handler that mounts in Next.js, Hono, React Router, Astro, or anything else.
+- **Safe by default.** Positive TTLs, limited concurrency, retries, payload limits, a push-host allowlist, and endpoints that never reach your logs.
+- **Works on iOS.** The client reports when an iPhone user must add your app to the Home Screen first.
+
+[Documentation](https://github.com/yousefelassal/pushpilot/tree/main/apps/docs) · [Examples](./examples)
+
+## Install
 
 ```sh
-pnpm add pushpilot
-pnpm exec pushpilot keygen
+npm install pushpilot
 ```
 
+Requires Node 22 or later, Bun, Deno, or Cloudflare Workers. React is optional.
+
+## Quickstart
+
+### 1. Generate VAPID keys
+
+```sh
+npx pushpilot keygen
+```
+
+Copy the printed `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` into your environment. Keep the private key secret.
+
+### 2. Create the server
+
 ```ts
+// lib/push.ts
 import { createPush } from 'pushpilot/server';
 
-const push = createPush({
-	vapid: {
-		publicKey: process.env.VAPID_PUBLIC_KEY,
-		privateKey: process.env.VAPID_PRIVATE_KEY,
-		subject: 'mailto:ops@example.com',
-	},
+export const push = createPush({
+  vapid: {
+    publicKey: process.env.VAPID_PUBLIC_KEY,
+    privateKey: process.env.VAPID_PRIVATE_KEY,
+    subject: 'mailto:you@example.com',
+  },
 });
-
-export const POST = push.handler({
-	async onSubscribe({ request, subscription, previousEndpoint }) {
-		// Authenticate and upsert in your database. Scope replacement to this user.
-		await saveSubscription(request, subscription, previousEndpoint);
-	},
-	async onUnsubscribe({ request, endpoint }) {
-		await deleteOwnedSubscription(request, endpoint);
-	},
-});
-
-const rows = await subscriptionsForUser(userId);
-const report = await push.send(rows, { title: 'New reply', url: '/inbox' });
-const expired = report.results.filter((result) => result.status === 'gone');
-await deleteRows(expired.map((result) => rows[result.index]!.id));
 ```
 
-The database and auth functions above are application code. Subscribe callbacks must authenticate before writing. Endpoints are secrets. Reports use `endpointHash` and input indexes so you can log outcomes without exposing subscription URLs. Delete only `gone` subscriptions. A 401 or 403 is a configuration error, not an expired subscription.
+### 3. Add the route
+
+The handler validates every request and then calls your callbacks. Authenticate the user and write to your database there.
 
 ```ts
-// In a bundled service worker:
-import { handlePush } from 'pushpilot/sw';
-handlePush({
-	fallback: { title: 'My app', body: 'You have a new notification.' },
-});
+// app/api/push/route.ts (Next.js)
+import { push } from '@/lib/push';
 
-// In the browser, after your app registers that worker:
-import { createPushClient } from 'pushpilot/client';
-const client = createPushClient();
-const stop = client.start();
-// Call client.enable() directly from a click handler once initialization finishes.
+export const POST = push.handler({
+  async onSubscribe({ request, subscription, previousEndpoint }) {
+    const user = await getUser(request);
+    if (!user) return new Response(null, { status: 401 });
+
+    await db.saveSubscription(user.id, subscription, previousEndpoint);
+  },
+
+  async onUnsubscribe({ request, endpoint }) {
+    const user = await getUser(request);
+    if (!user) return new Response(null, { status: 401 });
+
+    await db.deleteSubscription(user.id, endpoint);
+  },
+});
 ```
 
-For React, create a module-level client and pass it to `usePush(client)` from `pushpilot/react`. The hook returns a discriminated state. Actions stay on the client. Its server snapshot never accesses browser globals.
+Hono, React Router, and Astro mount the same handler. See the framework guides in the docs.
 
-## Work on this repository
+### 4. Add the service worker
+
+```ts
+// sw.ts (bundle this to /sw.js and register it in your app)
+import { handlePush } from 'pushpilot/sw';
+
+handlePush({
+  fallback: { title: 'My app', body: 'You have a new notification.' },
+});
+```
+
+### 5. Add the button
+
+```tsx
+import { createPushClient } from 'pushpilot/client';
+import { usePush } from 'pushpilot/react';
+
+const client = createPushClient();
+
+export function NotificationsButton() {
+  const state = usePush(client);
+
+  if (state.status === 'needs-install') {
+    return <p>Add this app to your Home Screen to get notifications.</p>;
+  }
+
+  if (state.status === 'subscribed') {
+    return <button onClick={() => client.disable()}>Turn off</button>;
+  }
+
+  return <button onClick={() => client.enable()}>Turn on notifications</button>;
+}
+```
+
+Create the client once, at module scope. Call `enable()` directly from a click so the browser shows the permission prompt.
+
+### 6. Send a notification
+
+```ts
+const rows = await db.subscriptionsForUser(userId);
+
+const report = await push.send(rows, {
+  title: 'New reply',
+  body: 'Ana answered your question.',
+  url: '/inbox',
+});
+
+const gone = report.results.filter((result) => result.status === 'gone');
+await db.deleteSubscriptions(gone.map((result) => rows[result.index].id));
+```
+
+Each result points back to your input with `index`. Delete only `gone` subscriptions. A `failed` result with reason `configuration` means your VAPID keys are wrong, not that the subscription expired.
+
+## Packages
+
+| Import             | Runs in                      | Use it for                                |
+| ------------------ | ---------------------------- | ----------------------------------------- |
+| `pushpilot/server` | Node, Bun, Deno, Workers     | `createPush`, `send`, and the route       |
+| `pushpilot/client` | Browser                      | Permission, subscribe, and unsubscribe    |
+| `pushpilot/react`  | Browser and server rendering | The `usePush` hook                        |
+| `pushpilot/sw`     | Service worker               | Showing notifications and handling clicks |
+| `pushpilot` (CLI)  | Node                         | `keygen` and `doctor` for your VAPID keys |
+
+## Contributing
 
 ```sh
 pnpm install
-pnpm build
-pnpm test
-pnpm typecheck
-pnpm docs:build
+pnpm check
 pnpm --filter @pushpilot/docs dev
 ```
 
-The Starlight docs include the complete quickstart, API reference, Hono, Next.js, React Router, and Astro examples, storage recipes, key rotation, iOS installation, and troubleshooting. Each example README has its run command. No package has been published by this implementation task.
+`pnpm check` runs type checks, tests, lint, formatting, the build, package checks, and runtime smoke tests.
+
+## License
 
 MIT, copyright Yousef Elassal.

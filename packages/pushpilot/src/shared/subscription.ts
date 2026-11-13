@@ -1,7 +1,9 @@
+import { PushpilotError } from './errors.js';
 import { decodeBase64, encodeBase64 } from './keys.js';
-import { PushpilotError, type PushSubscriptionRecord } from './types.js';
+import type { PushSubscriptionRecord } from './types/index.js';
+import { isObject } from './wire.js';
 
-const HOSTS = [
+const PUSH_SERVICE_HOSTS = [
 	'android.googleapis.com',
 	'fcm.googleapis.com',
 	'jmt17.google.com',
@@ -11,37 +13,57 @@ const HOSTS = [
 	'*.notify.windows.com',
 	'*.push.apple.com',
 ];
-const HOST_PATTERN =
+const HOSTNAME_PATTERN =
 	/^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z](?:[a-z0-9-]*[a-z0-9])?$/;
+const KEY_ID_PATTERN = /^[0-9a-f]{16}$/;
+const MAX_ENDPOINT_LENGTH = 8192;
+const P256_PUBLIC_KEY_BYTES = 65;
+const AUTH_SECRET_BYTES = 16;
 
-export function createHostMatcher(
-	extra?: readonly string[] | 'any',
-): (host: string) => boolean {
+function assertValidExtraHosts(extra: readonly string[] | 'any' | undefined) {
+	if (extra === undefined || extra === 'any') return;
 	if (
-		extra !== undefined &&
-		extra !== 'any' &&
-		(!Array.isArray(extra) ||
-			extra.some(
-				(host) => typeof host !== 'string' || !HOST_PATTERN.test(host),
-			))
+		!Array.isArray(extra) ||
+		extra.some(
+			(host) => typeof host !== 'string' || !HOSTNAME_PATTERN.test(host),
+		)
 	)
 		throw new PushpilotError(
 			'invalid-config',
 			'Invalid allowPushHosts. Use hostnames or *.suffix patterns.',
 		);
-	const patterns = [...HOSTS, ...(extra === 'any' ? [] : (extra ?? []))];
-	return (host) =>
-		extra === 'any' ||
-		patterns.some((pattern) =>
-			pattern.startsWith('*.')
-				? host.endsWith(pattern.slice(1)) && host !== pattern.slice(2)
-				: host === pattern,
-		);
 }
 
+function matchesPattern(host: string, pattern: string): boolean {
+	if (!pattern.startsWith('*.')) return host === pattern;
+	return host.endsWith(pattern.slice(1)) && host !== pattern.slice(2);
+}
+
+/**
+ * Combines known push services with explicit additions. Wildcards match
+ * proper subdomains only.
+ *
+ * @throws {PushpilotError} `invalid-config` for a malformed host entry.
+ */
+export function createHostMatcher(
+	extra?: readonly string[] | 'any',
+): (host: string) => boolean {
+	assertValidExtraHosts(extra);
+
+	const patterns = [
+		...PUSH_SERVICE_HOSTS,
+		...(extra === 'any' ? [] : (extra ?? [])),
+	];
+	return (host) =>
+		extra === 'any' ||
+		patterns.some((pattern) => matchesPattern(host, pattern));
+}
+
+/** Checks endpoint syntax without contacting it or applying the current service allowlist. */
 export function parseEndpoint(value: unknown): string {
-	if (typeof value !== 'string' || value.length > 8192)
+	if (typeof value !== 'string' || value.length > MAX_ENDPOINT_LENGTH)
 		throw new Error('Invalid endpoint');
+
 	const url = new URL(value);
 	if (
 		url.protocol !== 'https:' ||
@@ -49,36 +71,42 @@ export function parseEndpoint(value: unknown): string {
 		url.username ||
 		url.password ||
 		url.hash ||
-		!HOST_PATTERN.test(url.hostname) ||
+		!HOSTNAME_PATTERN.test(url.hostname) ||
 		/^\d+(?:\.\d+){3}$/.test(url.hostname) ||
 		url.hostname.endsWith('.localhost')
 	)
 		throw new Error('Invalid endpoint');
+
 	return value;
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
+/** Revalidates stored subscriptions at the send boundary, including P-256 curve membership. */
 export async function parseSubscription(
 	value: unknown,
 	match: (host: string) => boolean,
 ): Promise<PushSubscriptionRecord> {
-	if (!object(value)) throw new Error('Invalid subscription');
+	if (!isObject(value)) throw new Error('Invalid subscription');
+
 	const endpoint = parseEndpoint(value.endpoint);
 	if (
 		!match(new URL(endpoint).hostname) ||
 		typeof value.keyId !== 'string' ||
-		!/^[0-9a-f]{16}$/.test(value.keyId) ||
+		!KEY_ID_PATTERN.test(value.keyId) ||
 		typeof value.p256dh !== 'string' ||
 		typeof value.auth !== 'string'
 	)
 		throw new Error('Invalid subscription');
+
 	const p256dh = decodeBase64(value.p256dh);
 	const auth = decodeBase64(value.auth);
-	if (p256dh.length !== 65 || p256dh[0] !== 4 || auth.length !== 16)
+	if (
+		p256dh.length !== P256_PUBLIC_KEY_BYTES ||
+		p256dh[0] !== 4 ||
+		auth.length !== AUTH_SECRET_BYTES
+	)
 		throw new Error('Invalid subscription');
+
+	// Rejects points that are well-formed bytes but not on the P-256 curve.
 	await crypto.subtle.importKey(
 		'raw',
 		p256dh,
@@ -86,6 +114,7 @@ export async function parseSubscription(
 		false,
 		[],
 	);
+
 	return {
 		endpoint,
 		p256dh: encodeBase64(p256dh),
@@ -94,13 +123,15 @@ export async function parseSubscription(
 	};
 }
 
+/** Flattens browser subscription JSON and assigns the server-derived current VAPID keyId. */
 export async function parseBrowserSubscription(
 	value: unknown,
 	currentKeyId: string,
 	match: (host: string) => boolean,
 ): Promise<PushSubscriptionRecord> {
-	if (!object(value) || !object(value.keys))
+	if (!isObject(value) || !isObject(value.keys))
 		throw new Error('Invalid subscription');
+
 	return parseSubscription(
 		{
 			endpoint: value.endpoint,

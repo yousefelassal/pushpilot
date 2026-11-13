@@ -1,13 +1,16 @@
 ---
-title: Send your first notification
-description: Run an authenticated local example and receive a visible Web Push notification.
+title: Quickstart
+description: Subscribe a browser and send a visible Web Push notification in six steps.
 ---
 
-We will run a local app, subscribe this browser, and send a notification to it. Use Node 22 or later and pnpm 10. Desktop localhost works as a secure context. A phone needs HTTPS.
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-## Run an example
+You will subscribe your browser and send it a notification. Each step ends with something you can see.
 
-Clone the repository and install its workspace dependencies. Build the library first.
+You need Node 22 or later. Desktop `localhost` works as a secure context. A phone needs HTTPS.
+
+<Aside title="Want to see it work first?">
+  The repository ships runnable examples for Hono, Next.js, React Router, and Astro. Clone it, then run these commands.
 
 ```sh
 pnpm install
@@ -15,7 +18,7 @@ pnpm build
 pnpm --filter @pushpilot/example-hono exec pushpilot keygen
 ```
 
-Copy the generated keys into your shell environment. Set a contact subject and a demo password that you choose.
+Export the generated keys, a contact subject, and a demo password of your choice, then start the example.
 
 ```sh
 export VAPID_PUBLIC_KEY='your-generated-public-key'
@@ -25,45 +28,194 @@ export DEMO_SECRET='a-long-random-local-demo-password'
 pnpm --filter @pushpilot/example-hono dev
 ```
 
-Open `http://localhost:3000`. Enter the same demo password, then click **Enable notifications**. Accept the browser permission prompt. Wait for the status to read `subscribed`, then click **Send test notification**. A notification titled **Hello from pushpilot** appears.
+Open `http://localhost:3000`. Enter the same demo password, then click **Enable notifications**. Accept the permission prompt. When the status reads `subscribed`, click **Send test notification**. A notification titled **Hello from pushpilot** appears.
 
-The examples keep subscriptions in memory and accept one local demo password. Restarting the server clears subscriptions. Do not deploy this authentication or storage design as a production application.
+The examples keep subscriptions in memory and use one local demo password. Restarting the server clears subscriptions. Do not deploy this authentication or storage design.
 
-## Add the library to your application
+</Aside>
 
-```sh
-pnpm add pushpilot
-pnpm exec pushpilot keygen
-```
+<Steps>
 
-Create a server instance with your secrets. Missing or malformed keys produce a configuration error without printing their values.
+1.  **Install and generate keys**
 
-```ts
-import { createPush } from 'pushpilot/server';
+    ```sh
+    pnpm add pushpilot
+    pnpm exec pushpilot keygen
+    ```
 
-export const push = createPush({
-	vapid: {
-		publicKey: process.env.VAPID_PUBLIC_KEY,
-		privateKey: process.env.VAPID_PRIVATE_KEY,
-		subject: process.env.VAPID_SUBJECT,
-	},
-});
-```
+    The command prints a VAPID public and private key as environment assignments. It writes no files. Save them in `.env` with a contact subject, and keep the output out of shared logs.
 
-Mount `push.handler(callbacks)` at `/api/push`. Your callbacks authenticate requests and write your database. [Storage recipes](/recipes/storage/) contain the upsert, replacement, and pruning patterns. [Framework recipes](/recipes/frameworks/) show the mount for each framework.
+    ```sh
+    VAPID_PUBLIC_KEY=...
+    VAPID_PRIVATE_KEY=...
+    VAPID_SUBJECT=mailto:you@example.com
+    ```
 
-Build and register your [service worker](/recipes/service-worker/) before starting the client. The library discovers an existing registration and never installs another worker.
+    Check them.
 
-```ts
-import { createPushClient } from 'pushpilot/client';
+    ```sh
+    pnpm exec pushpilot doctor --env-file .env
+    ```
 
-export const client = createPushClient();
-const stop = client.start();
-client.listen(() => console.log(client.getSnapshot().status));
-// In the enable button's click handler:
-button.addEventListener('click', () => void client.enable());
-// On teardown:
-stop();
-```
+    Doctor prints one line per check and exits 0 when the keys are valid.
 
-Request permission directly from a click. Do not call `enable()` automatically on page load. [React](/reference/react/) uses the same client instance.
+2.  **Create the server instance**
+
+    Missing or malformed keys produce a configuration error without printing their values.
+
+    ```ts
+    // push.server.ts
+    import {
+      createPush,
+      type PushCallbacks,
+      type PushSubscriptionRecord,
+    } from 'pushpilot/server';
+
+    export const push = createPush({
+      vapid: {
+        publicKey: process.env.VAPID_PUBLIC_KEY,
+        privateKey: process.env.VAPID_PRIVATE_KEY,
+        subject: process.env.VAPID_SUBJECT,
+      },
+    });
+
+    // Local demo store. Use a database in production.
+    export const rows = new Map<string, PushSubscriptionRecord>();
+
+    export const callbacks = {
+      async onSubscribe({ request, subscription, previousEndpoint }) {
+        if (!(await isSignedIn(request)))
+          return new Response(null, { status: 401 });
+        if (previousEndpoint) rows.delete(previousEndpoint);
+        rows.set(subscription.endpoint, subscription);
+      },
+      async onUnsubscribe({ request, endpoint }) {
+        if (!(await isSignedIn(request)))
+          return new Response(null, { status: 401 });
+        rows.delete(endpoint);
+      },
+    } satisfies PushCallbacks;
+    ```
+
+    `isSignedIn` is your own auth check. Returning a `Response` refuses the operation. Returning nothing sends a 204. The in-memory map ignores account ownership, so read [Subscriptions and storage](/concepts/subscriptions-and-storage/) before you replace it.
+
+3.  **Mount the handler at `/api/push`**
+
+    <Tabs syncKey="framework">
+      <TabItem label="Next.js">
+        ```ts
+        // app/api/push/route.ts
+        import { push, callbacks } from '@/lib/push.server';
+
+        export const POST = push.handler(callbacks);
+        ```
+      </TabItem>
+      <TabItem label="Hono">
+        ```ts
+        import { Hono } from 'hono';
+        import { push, callbacks } from './push.server';
+
+        const handler = push.handler(callbacks);
+        const app = new Hono();
+
+        app.post('/api/push', (context) => handler(context.req.raw));
+
+        export default app;
+        ```
+      </TabItem>
+      <TabItem label="React Router">
+        ```ts
+        // app/routes/api.push.ts
+        import type { ActionFunctionArgs } from 'react-router';
+        import { push, callbacks } from '~/push.server';
+
+        const handler = push.handler(callbacks);
+
+        export function action({ request }: ActionFunctionArgs) {
+          return handler(request);
+        }
+        ```
+      </TabItem>
+      <TabItem label="Astro">
+        ```ts
+        // src/pages/api/push.ts
+        import type { APIRoute } from 'astro';
+        import { push, callbacks } from '../../push.server';
+
+        export const prerender = false;
+
+        const handler = push.handler(callbacks);
+
+        export const POST: APIRoute = ({ request }) => handler(request);
+        ```
+      </TabItem>
+    </Tabs>
+
+    Start your app and probe the route.
+
+    ```sh
+    pnpm exec pushpilot doctor --env-file .env --url http://localhost:3000/api/push
+    ```
+
+    Doctor posts the `config` action and confirms the route returns your public key and key ID. It sends no keys or subscription data. See [Frameworks](/frameworks/nextjs/) for each mount in detail.
+
+4. **Add the service worker**
+
+   ```ts
+   // src/sw.ts
+   import { handlePush } from 'pushpilot/sw';
+
+   handlePush({
+     fallback: {
+       title: 'My app',
+       body: 'You have a new notification.',
+       url: '/',
+     },
+   });
+   ```
+
+   Bundle it to `public/sw.js` and register it.
+
+   ```sh
+   pnpm add -D esbuild
+   pnpm exec esbuild src/sw.ts --bundle --format=iife --target=es2022 --outfile=public/sw.js
+   ```
+
+   ```ts
+   await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+   ```
+
+   Open DevTools, then Application, then Service Workers. The worker shows as activated. The library finds an existing registration and never installs another worker. See [Build the service worker](/guides/service-worker-setup/) for Vite and Workbox setups.
+
+5. **Add an enable button**
+
+   ```ts
+   import { createPushClient } from 'pushpilot/client';
+
+   export const client = createPushClient();
+   const stop = client.start();
+   client.listen(() => console.log(client.getSnapshot().status));
+
+   button.addEventListener('click', () => void client.enable());
+   // On teardown:
+   stop();
+   ```
+
+   Click the button and accept the browser prompt. The console logs `enabling`, then `subscribed`. Request permission directly from a click. Do not call `enable()` on page load. React users can use [`usePush`](/reference/react/) with the same client.
+
+6. **Send a notification**
+
+   Add a route you control and call it while signed in.
+
+   ```ts
+   const report = await push.send([...rows.values()], {
+     title: 'Hello from pushpilot',
+     body: 'It works.',
+     url: '/',
+   });
+   console.log(report.results);
+   ```
+
+   A notification appears. Each entry in `report.results` reads `accepted`. Delete rows whose status is `gone`. See [Sending and pruning](/concepts/sending-and-pruning/).
+
+</Steps>

@@ -1,5 +1,4 @@
 import { encryptNotification, vapidHeaders } from '@block65/webcrypto-web-push';
-import type { PreparedKey, prepareKeys } from '../shared/keys.js';
 import { parseSubscription } from '../shared/subscription.js';
 import type {
 	DeliveryResult,
@@ -8,21 +7,17 @@ import type {
 	ResultBase,
 	RetryableReason,
 	SendReport,
-} from '../shared/types.js';
+} from '../shared/types/index.js';
+import type {
+	Attempt,
+	BatchState,
+	DeliveryInput,
+	Recipient,
+} from './types/delivery.js';
 
-interface DeliveryInput {
-	subscriptions: readonly PushSubscriptionRecord[];
-	payload: Uint8Array<ArrayBuffer>;
-	ttl: number;
-	urgency: string;
-	keys: Awaited<ReturnType<typeof prepareKeys>>;
-	matchHost: (host: string) => boolean;
-	fetcher: (url: string, init: RequestInit) => Promise<Response>;
-}
-
-type Attempt =
-	| { status: number; retryAfter: string | null }
-	| { status: null; retryAfter: null };
+const MAX_CONCURRENCY = 6;
+const ATTEMPT_DEADLINE_MS = 10_000;
+const MAX_RETRY_DELAY_MS = 2000;
 
 function failure(
 	base: ResultBase,
@@ -56,9 +51,11 @@ function classify(base: ResultBase, status: number | null): DeliveryResult {
 	return failure(base, status, 'unexpected');
 }
 
+/** Honors Retry-After (seconds or HTTP date) but never waits longer than two seconds. */
 function retryDelay(result: Attempt): number {
 	const fallback = result.status === 429 ? 1000 : 500;
 	if (result.retryAfter === null) return fallback;
+
 	const seconds = /^\d+$/.test(result.retryAfter.trim())
 		? Number(result.retryAfter)
 		: NaN;
@@ -66,12 +63,13 @@ function retryDelay(result: Attempt): number {
 		? seconds * 1000
 		: Date.parse(result.retryAfter) - Date.now();
 	return Number.isFinite(milliseconds)
-		? Math.max(0, Math.min(2000, milliseconds))
+		? Math.max(0, Math.min(MAX_RETRY_DELAY_MS, milliseconds))
 		: fallback;
 }
 
 async function hashEndpoint(endpoint: unknown): Promise<string> {
 	if (typeof endpoint !== 'string') return '';
+
 	const hash = new Uint8Array(
 		await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint)),
 	);
@@ -80,6 +78,7 @@ async function hashEndpoint(endpoint: unknown): Promise<string> {
 	).join('');
 }
 
+/** Bounds fetch and body cleanup together, even when an injected fetch ignores AbortSignal. */
 async function attempt(
 	fetcher: DeliveryInput['fetcher'],
 	endpoint: string,
@@ -93,18 +92,21 @@ async function attempt(
 			expired = true;
 			controller.abort();
 			reject(new Error('Delivery deadline exceeded.'));
-		}, 10000);
+		}, ATTEMPT_DEADLINE_MS);
 	});
+
 	try {
 		const pending = Promise.resolve().then(() =>
 			fetcher(endpoint, { ...init, signal: controller.signal }),
 		);
+		// A custom fetch may resolve after the race timed out; its body still needs cancellation.
 		void pending.then(
 			(response) => {
 				if (expired) void response.body?.cancel().catch(() => {});
 			},
 			() => {},
 		);
+
 		const response = await Promise.race([pending, deadline]);
 		const result = {
 			status: response.status,
@@ -121,113 +123,186 @@ async function attempt(
 	}
 }
 
+/**
+ * Validates a stored record and finds its signing key. Returns a final
+ * result instead of a recipient when the record cannot be sent to.
+ */
+async function resolveRecipient(
+	state: BatchState,
+	index: number,
+	candidate: PushSubscriptionRecord,
+): Promise<{ recipient: Recipient } | { result: DeliveryResult }> {
+	const { input, blocked } = state;
+	const base: ResultBase = {
+		index,
+		endpointHash: await hashEndpoint(candidate?.endpoint),
+		attempts: 0,
+		needsResubscribe: false,
+	};
+
+	let subscription: PushSubscriptionRecord;
+	try {
+		subscription = await parseSubscription(candidate, input.matchHost);
+	} catch {
+		return { result: failure(base, null, 'invalid-subscription') };
+	}
+
+	const known = {
+		...base,
+		needsResubscribe: subscription.keyId !== input.keys.current.keyId,
+	};
+	const key = input.keys.byId.get(subscription.keyId);
+	if (!key)
+		return { result: { ...known, status: 'outdated', httpStatus: null } };
+
+	// VAPID audience and signing key jointly determine which requests share a config failure.
+	const group = `${new URL(subscription.endpoint).origin}|${key.keyId}`;
+	if (blocked.has(group))
+		return { result: failure(known, null, 'not-attempted') };
+
+	return { recipient: { subscription, key, base: known, group } };
+}
+
+function toWireSubscription({ subscription }: Recipient) {
+	return {
+		endpoint: subscription.endpoint,
+		expirationTime: null,
+		keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+	};
+}
+
+/** Signs once per group and shares the pending promise between concurrent recipients. */
+async function authorizationFor(
+	state: BatchState,
+	recipient: Recipient,
+): Promise<string> {
+	let headers = state.headersByGroup.get(recipient.group);
+	if (!headers) {
+		headers = vapidHeaders(toWireSubscription(recipient), recipient.key);
+		state.headersByGroup.set(recipient.group, headers);
+	}
+	return (await headers).headers.authorization;
+}
+
+function buildRequest(
+	input: DeliveryInput,
+	body: Uint8Array<ArrayBuffer>,
+	authorization: string,
+): RequestInit {
+	return {
+		method: 'POST',
+		redirect: 'manual',
+		body,
+		headers: {
+			authorization,
+			'content-type': 'application/octet-stream',
+			'content-encoding': 'aes128gcm',
+			TTL: String(input.ttl),
+			Urgency: input.urgency,
+		},
+	};
+}
+
+/** Makes at most two requests, retrying once for retryable failures. */
+async function sendWithRetry(
+	state: BatchState,
+	recipient: Recipient,
+	request: RequestInit,
+): Promise<DeliveryResult> {
+	const { input, blocked } = state;
+	const { subscription, group } = recipient;
+	let base = recipient.base;
+
+	// A concurrent rejection can suppress a retry, but must not erase an earlier response.
+	let lastOutcome: DeliveryResult | undefined;
+	for (const attempts of [1, 2] as const) {
+		if (blocked.has(group))
+			return lastOutcome ?? failure(base, null, 'not-attempted');
+
+		base = { ...base, attempts };
+		const result = await attempt(input.fetcher, subscription.endpoint, request);
+		if (result.status === 401 || result.status === 403) blocked.add(group);
+
+		const outcome = classify(base, result.status);
+		lastOutcome = outcome;
+
+		const shouldRetry =
+			attempts === 1 && outcome.status === 'failed' && outcome.retryable;
+		if (!shouldRetry) return outcome;
+		await new Promise((resolve) => setTimeout(resolve, retryDelay(result)));
+	}
+	return failure(base, null, 'unexpected');
+}
+
+async function sendOne(
+	state: BatchState,
+	index: number,
+	candidate: PushSubscriptionRecord,
+): Promise<DeliveryResult> {
+	const resolved = await resolveRecipient(state, index, candidate);
+	if ('result' in resolved) return resolved.result;
+	const { recipient } = resolved;
+
+	let body: Uint8Array<ArrayBuffer>;
+	try {
+		body = await encryptNotification(
+			toWireSubscription(recipient),
+			state.input.payload,
+		);
+	} catch {
+		// Bad browser keys are not a VAPID problem, so resubscribing under a new key would not help.
+		return failure(
+			{ ...recipient.base, needsResubscribe: false },
+			null,
+			'invalid-subscription',
+		);
+	}
+
+	let authorization: string;
+	try {
+		authorization = await authorizationFor(state, recipient);
+	} catch {
+		state.blocked.add(recipient.group);
+		return failure(recipient.base, null, 'configuration');
+	}
+
+	return sendWithRetry(
+		state,
+		recipient,
+		buildRequest(state.input, body, authorization),
+	);
+}
+
+/** Returns one outcome per input index, with six slots covering encryption, I/O, and retries. */
 export async function deliver(input: DeliveryInput): Promise<SendReport> {
 	const results: DeliveryResult[] = [];
-	const blocked = new Set<string>();
-	const headersByGroup = new Map<
-		string,
-		Promise<{ headers: { authorization: string } }>
-	>();
+	const state: BatchState = {
+		input,
+		blocked: new Set(),
+		headersByGroup: new Map(),
+	};
 	let cursor = 0;
-
-	async function sendOne(
-		index: number,
-		candidate: PushSubscriptionRecord,
-	): Promise<DeliveryResult> {
-		const endpointHash = await hashEndpoint(candidate?.endpoint);
-		let base: ResultBase = {
-			index,
-			endpointHash,
-			attempts: 0,
-			needsResubscribe: false,
-		};
-		let subscription: PushSubscriptionRecord;
-		try {
-			subscription = await parseSubscription(candidate, input.matchHost);
-		} catch {
-			return failure(base, null, 'invalid-subscription');
-		}
-		base = {
-			...base,
-			needsResubscribe: subscription.keyId !== input.keys.current.keyId,
-		};
-		const key = input.keys.byId.get(subscription.keyId);
-		if (!key) return { ...base, status: 'outdated', httpStatus: null };
-		const group = `${new URL(subscription.endpoint).origin}|${key.keyId}`;
-		if (blocked.has(group)) return failure(base, null, 'not-attempted');
-		const wireSubscription = {
-			endpoint: subscription.endpoint,
-			expirationTime: null,
-			keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-		};
-		let body: Uint8Array<ArrayBuffer>;
-		try {
-			body = await encryptNotification(wireSubscription, input.payload);
-		} catch {
-			return failure(
-				{ ...base, needsResubscribe: false },
-				null,
-				'invalid-subscription',
-			);
-		}
-		let authorization: string;
-		try {
-			let headers = headersByGroup.get(group);
-			if (!headers) {
-				headers = vapidHeaders(wireSubscription, key satisfies PreparedKey);
-				headersByGroup.set(group, headers);
-			}
-			authorization = (await headers).headers.authorization;
-		} catch {
-			blocked.add(group);
-			return failure(base, null, 'configuration');
-		}
-		let lastOutcome: DeliveryResult | undefined;
-		for (const attempts of [1, 2] as const) {
-			if (blocked.has(group))
-				return lastOutcome ?? failure(base, null, 'not-attempted');
-			base = { ...base, attempts };
-			const result = await attempt(input.fetcher, subscription.endpoint, {
-				method: 'POST',
-				redirect: 'manual',
-				body,
-				headers: {
-					authorization,
-					'content-type': 'application/octet-stream',
-					'content-encoding': 'aes128gcm',
-					TTL: String(input.ttl),
-					Urgency: input.urgency,
-				},
-			});
-			if (result.status === 401 || result.status === 403) blocked.add(group);
-			const outcome = classify(base, result.status);
-			lastOutcome = outcome;
-			if (attempts === 1 && outcome.status === 'failed' && outcome.retryable) {
-				await new Promise((resolve) => setTimeout(resolve, retryDelay(result)));
-				continue;
-			}
-			return outcome;
-		}
-		return failure(base, null, 'unexpected');
-	}
 
 	async function worker(): Promise<void> {
 		while (cursor < input.subscriptions.length) {
 			const index = cursor++;
 			const subscription = input.subscriptions[index];
-			if (subscription === undefined) {
-				results[index] = failure(
-					{ index, endpointHash: '', attempts: 0, needsResubscribe: false },
-					null,
-					'invalid-subscription',
-				);
-			} else {
-				results[index] = await sendOne(index, subscription);
-			}
+			results[index] =
+				subscription === undefined
+					? failure(
+							{ index, endpointHash: '', attempts: 0, needsResubscribe: false },
+							null,
+							'invalid-subscription',
+						)
+					: await sendOne(state, index, subscription);
 		}
 	}
+
 	await Promise.all(
-		Array.from({ length: Math.min(6, input.subscriptions.length) }, worker),
+		Array.from(
+			{ length: Math.min(MAX_CONCURRENCY, input.subscriptions.length) },
+			worker,
+		),
 	);
 	return { results };
 }

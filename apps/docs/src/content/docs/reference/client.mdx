@@ -1,14 +1,15 @@
 ---
 title: Browser client
+description: Create the browser client, read its state, and call enable, disable, detach, and sync.
 ---
 
 `createPushClient` from `pushpilot/client` creates an SSR-safe store. Import and construction do not access browser globals.
 
 ```ts
 const client = createPushClient({
-	endpoint: '/api/push',
-	serviceWorkerScope: '/',
-	fetch: customFetch,
+  endpoint: '/api/push',
+  serviceWorkerScope: '/',
+  fetch: customFetch,
 });
 const stop = client.start();
 const unlisten = client.listen(() => render(client.getSnapshot()));

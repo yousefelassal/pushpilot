@@ -56,10 +56,10 @@ try {
 	const selected = process.argv.slice(2);
 	if (selected.some((name) => !['chromium', 'firefox'].includes(name)))
 		throw new Error('Choose chromium or firefox.');
-	for (const [name, engine] of [
-		['chromium', chromium],
-		['firefox', firefox],
-	].filter(([name]) => !selected.length || selected.includes(name))) {
+	for (const { name, engine } of [
+		{ name: 'chromium', engine: chromium },
+		{ name: 'firefox', engine: firefox },
+	].filter(({ name }) => !selected.length || selected.includes(name))) {
 		const browser = await engine.launch({ headless: true, timeout: 30000 });
 		try {
 			const context = await browser.newContext({

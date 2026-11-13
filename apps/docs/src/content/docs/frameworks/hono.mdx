@@ -1,0 +1,35 @@
+---
+title: Hono
+description: Mount the push handler on a Hono app, including Cloudflare Workers.
+---
+
+The handler takes a standard `Request`, so Hono passes `context.req.raw` straight through.
+
+```ts
+import { Hono } from 'hono';
+import { createPush } from 'pushpilot/server';
+import { callbacksFor } from './application-auth-and-storage';
+
+const app = new Hono<{ Bindings: Env }>();
+app.post('/api/push', (context) => {
+  const push = createPush({
+    vapid: {
+      publicKey: context.env.VAPID_PUBLIC_KEY,
+      privateKey: context.env.VAPID_PRIVATE_KEY,
+      subject: context.env.VAPID_SUBJECT,
+    },
+  });
+  return push.handler(callbacksFor(context))(context.req.raw);
+});
+export default app;
+```
+
+`Env` and `callbacksFor` belong to your application. Secrets and auth come from the Hono context. Workers expose bindings per request, so this example builds the instance inside the route. Reuse an instance when its configuration is stable.
+
+## Large recipient lists
+
+Workers have plan-specific CPU, subrequest, and background-lifetime limits. For large lists, use caller-owned queue consumers within your current limits. See [Queue sends and diagnose failures](/guides/operations/).
+
+## Node
+
+A Node HTTP server needs a conversion between Node HTTP objects and Web `Request` and `Response`. The library exports no Node adapter. The Hono Node example in `examples/hono` supplies that conversion.

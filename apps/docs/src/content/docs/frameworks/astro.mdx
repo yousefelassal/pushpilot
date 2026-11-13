@@ -1,0 +1,27 @@
+---
+title: Astro
+description: Mount the push handler as a server endpoint.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```ts
+// src/pages/api/push.ts
+import type { APIRoute } from 'astro';
+import { push, callbacksFor } from '../../push.server';
+
+export const prerender = false;
+export const POST: APIRoute = ({ request, locals }) =>
+  push.handler(callbacksFor(locals))(request);
+```
+
+Use server output and the adapter for your runtime. A static-only deployment cannot handle subscription writes or sends.
+
+## Node standalone adapter
+
+Configure `security.allowedDomains` with the deployment's trusted hostname, protocol, and port. Without a trusted hostname, the adapter can reconstruct a different request origin and cause same-origin POST requests to fail.
+
+<Aside>
+  The runnable Astro example in `examples/astro` allowlists its two local
+  development origins. Keep the handler's Origin check enabled.
+</Aside>

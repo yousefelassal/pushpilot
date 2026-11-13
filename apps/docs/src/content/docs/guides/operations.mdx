@@ -1,27 +1,9 @@
 ---
-title: Rotate keys and operate delivery
+title: Queue sends and diagnose failures
+description: Chunk large sends, set TTL, cap devices, and act on each failure outcome.
 ---
 
-## Rotate VAPID keys
-
-Generate a new pair. Deploy it as current and retain the previous pair for your chosen grace period.
-
-```ts
-const push = createPush({
-	vapid: {
-		publicKey: env.NEW_PUBLIC_KEY,
-		privateKey: env.NEW_PRIVATE_KEY,
-		subject: env.VAPID_SUBJECT,
-		previous: [
-			{ publicKey: env.OLD_PUBLIC_KEY, privateKey: env.OLD_PRIVATE_KEY },
-		],
-	},
-});
-```
-
-Old subscriptions are signed with their matching retained key and have `needsResubscribe: true`. Returning browsers replace them under the current public key. Your callback can remove `previousEndpoint` and write the replacement in one transaction.
-
-After the grace period, remove the old pair. Remaining old rows report `outdated` without a network request. Do not rewrite their keyIds. A server cannot rebind an existing browser subscription. For a compromised key, remove it immediately and accept that those browsers must reopen before they can receive again.
+Key rotation has its own page: [Key rotation](/concepts/key-rotation/).
 
 ## Queue large sends
 
@@ -29,10 +11,10 @@ The library has six slots per send call. Multiple simultaneous calls multiply co
 
 ```ts
 for (let offset = 0; offset < rows.length; offset += 25) {
-	const selected = rows.slice(offset, offset + 25);
-	const report = await push.send(selected, notification, { ttl: 3600 });
-	await pruneGone(selected, report);
-	await queueTemporaryFailures(selected, report);
+  const selected = rows.slice(offset, offset + 25);
+  const report = await push.send(selected, notification, { ttl: 3600 });
+  await pruneGone(selected, report);
+  await queueTemporaryFailures(selected, report);
 }
 ```
 

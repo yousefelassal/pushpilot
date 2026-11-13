@@ -7,7 +7,7 @@
 		"build": "pnpm --filter pushpilot build",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit",
-		"lint": "oxlint packages scripts",
+		"lint": "oxlint --type-aware --max-warnings=0",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
 		"docs:build": "pnpm --filter @pushpilot/docs build",
@@ -18,7 +18,10 @@
 		"smoke:browser": "node scripts/browser-smoke.mjs",
 		"check": "pnpm typecheck && pnpm test && pnpm lint && pnpm format:check && pnpm build && pnpm check:package && pnpm smoke && pnpm smoke:cli && pnpm smoke:workerd && pnpm docs:build",
 		"smoke:cli": "node scripts/cli-smoke.mjs",
-		"smoke:examples": "node scripts/examples-check.mjs"
+		"smoke:examples": "node scripts/examples-check.mjs",
+		"lint:fix": "oxlint --type-aware --fix",
+		"release": "pnpm build && changeset publish",
+		"version-packages": "changeset version && pnpm install --lockfile-only"
 	},
 	"devDependencies": {
 		"@arethetypeswrong/cli": "0.18.5",
@@ -30,13 +33,14 @@
 		"@types/react-dom": "19.2.2",
 		"esbuild": "0.27.0",
 		"miniflare": "4.20260730.0",
-		"oxlint": "1.32.0",
+		"oxlint": "1.90.0",
 		"prettier": "3.6.2",
 		"publint": "0.3.15",
 		"react": "19.2.7",
 		"react-dom": "19.2.7",
 		"tsdown": "0.15.12",
 		"typescript": "5.9.3",
-		"vitest": "3.2.4"
+		"vitest": "3.2.4",
+		"oxlint-tsgolint": "7.0.2005"
 	}
 }

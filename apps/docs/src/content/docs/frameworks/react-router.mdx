@@ -1,0 +1,20 @@
+---
+title: React Router
+description: Mount the push handler as a resource route.
+---
+
+```ts
+// app/routes/api.push.ts
+import type { ActionFunctionArgs } from 'react-router';
+import { push, callbacksFor } from '~/push.server';
+
+export function action({ request, context }: ActionFunctionArgs) {
+  return push.handler(callbacksFor(context))(request);
+}
+```
+
+Map `/api/push` to this resource route. Context is captured in the callback closure. It is not passed into the library.
+
+`push` and `callbacksFor` are application-defined. Avoid middleware that consumes the request body before the handler.
+
+The runnable example lives in `examples/react-router`. Its shared store and password are for local testing only.

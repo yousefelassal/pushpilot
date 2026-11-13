@@ -1,0 +1,47 @@
+---
+title: Introduction
+description: What pushpilot does, what you keep, and what it needs to run.
+---
+
+import { CardGrid, Card, LinkCard } from '@astrojs/starlight/components';
+
+pushpilot handles the Web Push protocol. You keep authentication, your database, recipient selection, and deployment.
+
+## What the library does
+
+<CardGrid>
+  <Card title="Server">
+    Encrypts notifications, signs them with your VAPID keys, and reports which
+    subscriptions have expired.
+  </Card>
+  <Card title="HTTP handler">
+    A standard `Request` and `Response` handler calls your `onSubscribe` and
+    `onUnsubscribe` callbacks.
+  </Card>
+  <Card title="Browser client">
+    Handles permission and subscription state, and reconciles the browser with
+    your server.
+  </Card>
+  <Card title="Service worker">
+    Always attempts to show a notification, with a fallback for malformed
+    payloads.
+  </Card>
+</CardGrid>
+
+## What you keep
+
+pushpilot ships no database adapter, hosted backend, migration, queue, or telemetry. Your application decides who is signed in, where subscriptions live, and who receives each notification.
+
+## Requirements
+
+- The server package requires Node 22 or later, Bun, Deno, or Cloudflare Workers with WebCrypto and fetch.
+- React is optional.
+- Desktop `localhost` counts as a secure context. A phone needs HTTPS.
+
+See [Runtime and browser support](/guides/platforms/) for platform details, including iOS.
+
+<LinkCard
+  title="Quickstart"
+  description="Subscribe a browser and send a notification."
+  href="/quickstart/"
+/>

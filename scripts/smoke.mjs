@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import packageJson from '../packages/pushpilot/package.json' with { type: 'json' };
 
 const directory = await mkdtemp(join(tmpdir(), 'pushpilot-packed-'));
 try {
@@ -77,7 +78,7 @@ try {
 		execFileSync(process.execPath, [cli, '--version'], {
 			encoding: 'utf8',
 		}).trim(),
-		'0.1.0',
+		packageJson.version,
 	);
 	for (const entry of ['client', 'sw', 'react']) {
 		const contents = await readFile(

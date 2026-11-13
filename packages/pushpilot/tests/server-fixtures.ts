@@ -1,5 +1,5 @@
 import { encodeBase64, keyId } from '../src/shared/keys.js';
-import type { PushSubscriptionRecord } from '../src/shared/types.js';
+import type { PushSubscriptionRecord } from '../src/shared/types/index.js';
 
 export async function pair() {
 	const keys = await crypto.subtle.generateKey(

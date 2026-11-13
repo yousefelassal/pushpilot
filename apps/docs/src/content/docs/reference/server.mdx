@@ -1,18 +1,19 @@
 ---
 title: Server and HTTP reference
+description: Create a sender, build notifications, read delivery results, and use the HTTP endpoint.
 ---
 
 `pushpilot/server` exports `createPush`, `PushpilotError`, and the server types. The package has no root runtime export.
 
 ```ts
 const push = createPush({
-	vapid: { publicKey, privateKey, subject, previous: oldKeyPairs },
-	allowPushHosts: ['push.example.com'],
-	fetch: customFetch,
+  vapid: { publicKey, privateKey, subject, previous: oldKeyPairs },
+  allowPushHosts: ['push.example.com'],
+  fetch: customFetch,
 });
 const report = await push.send(subscriptions, notification, {
-	ttl: 86400,
-	urgency: 'normal',
+  ttl: 86400,
+  urgency: 'normal',
 });
 const handler = push.handler({ onSubscribe, onUnsubscribe });
 ```
@@ -54,13 +55,13 @@ Config returns 200 with `{ "publicKey": "...", "keyId": "..." }`.
 
 ```json
 {
-	"action": "subscribe",
-	"publicKey": "current VAPID public key",
-	"subscription": {
-		"endpoint": "https://push-service.example/secret",
-		"keys": { "p256dh": "...", "auth": "..." }
-	},
-	"previousEndpoint": "https://old-service.example/secret"
+  "action": "subscribe",
+  "publicKey": "current VAPID public key",
+  "subscription": {
+    "endpoint": "https://push-service.example/secret",
+    "keys": { "p256dh": "...", "auth": "..." }
+  },
+  "previousEndpoint": "https://old-service.example/secret"
 }
 ```
 

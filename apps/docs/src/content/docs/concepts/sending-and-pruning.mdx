@@ -1,0 +1,63 @@
+---
+title: Sending and pruning
+description: Send to stored subscriptions, read the report, and delete expired rows safely.
+---
+
+import { Aside, LinkCard } from '@astrojs/starlight/components';
+
+`push.send` takes the subscriptions you selected, a notification, and optional settings. It returns one result per subscription, in input order.
+
+```ts
+const report = await push.send(
+  subscriptions,
+  { title: 'New reply', body: 'Someone answered you.', url: '/inbox' },
+  { ttl: 3600, urgency: 'normal' },
+);
+```
+
+A notification needs a nonempty `title`. The full field list is in the [server reference](/reference/server/).
+
+## Read the report
+
+| Status     | Meaning                                            | What you do                        |
+| ---------- | -------------------------------------------------- | ---------------------------------- |
+| `accepted` | Any 2xx from the push service                      | Keep the row.                      |
+| `gone`     | 404 or 410                                         | Delete the indexed row.            |
+| `outdated` | Unknown VAPID keyId, not sent                      | Wait for browser resubscription.   |
+| `failed`   | Invalid record, configuration, or delivery failure | Keep the row and inspect `reason`. |
+
+An accepted notification has reached the push service. It has not necessarily reached the browser.
+
+## Prune expired subscriptions
+
+Keep the selected array stable while you process its report. Results refer to inputs by `index`.
+
+```ts
+const selected = await loadOwnedSubscriptions(userId);
+const report = await push.send(selected, { title: 'New reply' });
+for (const result of report.results) {
+  if (result.status === 'gone') {
+    const row = selected[result.index];
+    if (row) await deleteOwnedSubscription(userId, row.endpoint);
+  }
+}
+```
+
+The load and delete functions are your queries.
+
+<Aside type="caution">
+  Never delete on 401, 403, `outdated`, or another failed result. A 401 or 403
+  usually means a configuration problem, not an expired subscription.
+</Aside>
+
+For high concurrency, include the selected row's version or original keyId in the delete predicate. An old send then cannot delete a record that was replaced meanwhile. Use row IDs for database work and `endpointHash` for logs.
+
+## TTL and urgency
+
+TTL is an integer from 1 to 2419200 seconds, default 86400 (one day). Pick a value that matches how long the message stays useful. Short-lived activity may need minutes. A message for an offline user may need hours. Urgency is `very-low`, `low`, `normal`, or `high`, default `normal`.
+
+<LinkCard
+  title="Queue sends and diagnose failures"
+  description="Chunk large lists, retry safely, and read each failure."
+  href="/guides/operations/"
+/>

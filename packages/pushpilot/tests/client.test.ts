@@ -5,7 +5,7 @@ import { encodeBase64, keyId } from '../src/shared/keys.js';
 let publicKey: string;
 let currentKeyId: string;
 let subscription: ReturnType<typeof makeSubscription> | null;
-let requests: Record<string, unknown>[];
+let requests: Array<Record<string, unknown>>;
 let responseStatus: number;
 let permission: NotificationPermission;
 let requestPermission: ReturnType<typeof vi.fn>;
@@ -86,7 +86,9 @@ beforeEach(async () => {
 			visibilityListeners.delete(listener),
 	});
 	fetcher = vi.fn(async (_url: string, init: RequestInit) => {
-		const body: Record<string, unknown> = JSON.parse(String(init.body));
+		if (typeof init.body !== 'string')
+			throw new Error('Expected a JSON string request body');
+		const body: Record<string, unknown> = JSON.parse(init.body);
 		requests.push(body);
 		return body.action === 'config'
 			? Response.json({ publicKey, keyId: currentKeyId })
@@ -264,7 +266,9 @@ it('serializes a detach behind initialization and shares in-flight detach', asyn
 		release = resolve;
 	});
 	const gatedFetch = vi.fn(async (url: string, init: RequestInit) => {
-		const body: Record<string, unknown> = JSON.parse(String(init.body));
+		if (typeof init.body !== 'string')
+			throw new Error('Expected a JSON string request body');
+		const body: Record<string, unknown> = JSON.parse(init.body);
 		if (body.action === 'subscribe') await gate;
 		return fetcher(url, init);
 	});

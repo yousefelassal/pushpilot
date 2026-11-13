@@ -1,5 +1,6 @@
 ---
 title: Authentication and endpoint secrecy
+description: Protect endpoints, authenticate callbacks, and handle sign-out and cross-origin setups.
 ---
 
 A push endpoint is a capability URL. Never print it, auth secrets, or a VAPID private key in logs. Disable request-body logging on the push route. Delivery reports contain only an input index and `endpointHash` for correlation. Hashes are not database identifiers.
@@ -15,8 +16,8 @@ Call detach while the old session still exists. Check its final state before end
 ```ts
 const result = await client.detach();
 if (result.status !== 'unsubscribed') {
-	showRetryMessage();
-	return;
+  showRetryMessage();
+  return;
 }
 await applicationSignOut();
 ```
@@ -32,27 +33,27 @@ For a trusted frontend on a separate origin, put a CORS and CSRF wrapper before 
 ```ts
 const trustedFrontend = 'https://app.example.com';
 async function crossOriginPush(request: Request): Promise<Response> {
-	if (request.headers.get('origin') !== trustedFrontend)
-		return new Response(null, { status: 403 });
-	const headers = new Headers(request.headers);
-	headers.delete('origin');
-	// verifyCsrf checks your session-bound token before any mutation.
-	if (request.method !== 'OPTIONS' && !(await verifyCsrf(request)))
-		return new Response(null, { status: 403 });
-	const response =
-		request.method === 'OPTIONS'
-			? new Response(null, { status: 204 })
-			: await handler(new Request(request, { headers }));
-	const result = new Response(response.body, response);
-	result.headers.set('access-control-allow-origin', trustedFrontend);
-	result.headers.set('access-control-allow-credentials', 'true');
-	result.headers.set('access-control-allow-methods', 'POST');
-	result.headers.set(
-		'access-control-allow-headers',
-		'content-type,x-csrf-token',
-	);
-	result.headers.append('vary', 'Origin');
-	return result;
+  if (request.headers.get('origin') !== trustedFrontend)
+    return new Response(null, { status: 403 });
+  const headers = new Headers(request.headers);
+  headers.delete('origin');
+  // verifyCsrf checks your session-bound token before any mutation.
+  if (request.method !== 'OPTIONS' && !(await verifyCsrf(request)))
+    return new Response(null, { status: 403 });
+  const response =
+    request.method === 'OPTIONS'
+      ? new Response(null, { status: 204 })
+      : await handler(new Request(request, { headers }));
+  const result = new Response(response.body, response);
+  result.headers.set('access-control-allow-origin', trustedFrontend);
+  result.headers.set('access-control-allow-credentials', 'true');
+  result.headers.set('access-control-allow-methods', 'POST');
+  result.headers.set(
+    'access-control-allow-headers',
+    'content-type,x-csrf-token',
+  );
+  result.headers.append('vary', 'Origin');
+  return result;
 }
 ```
 

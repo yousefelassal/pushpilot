@@ -1,0 +1,272 @@
+---
+title: Store subscriptions in your database
+description: Copy-paste upsert, replacement, and pruning patterns for common databases.
+---
+
+Pick your database, copy the pattern, and adapt the names. These examples are application code, not pushpilot adapters. Read [Subscriptions and storage](/concepts/subscriptions-and-storage/) first for the ownership rules they follow.
+
+`userId` always comes from your authenticated server session. `subscription` and `previousEndpoint` come from `onSubscribe`. Never accept a user ID from the subscribe JSON body.
+
+Use a unique endpoint and an idempotent upsert. Delete an old endpoint only within the authenticated user's scope. The examples also scope updates to the existing owner. An account switch needs a separate application decision to authorize reassignment; endpoint possession alone does not prove ownership.
+
+## Raw PostgreSQL
+
+Create an application-owned table. The schema is a recipe, not a package migration.
+
+```sql
+CREATE TABLE push_subscriptions (
+  endpoint text PRIMARY KEY,
+  user_id text NOT NULL,
+  p256dh text NOT NULL,
+  auth text NOT NULL,
+  key_id text NOT NULL
+);
+CREATE INDEX push_subscriptions_user ON push_subscriptions(user_id);
+```
+
+With a checked-out `pg` client, replace the old endpoint and upsert atomically.
+
+```ts
+await client.query('BEGIN');
+try {
+  if (previousEndpoint)
+    await client.query(
+      'DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint = $2',
+      [userId, previousEndpoint],
+    );
+  const written = await client.query(
+    `
+    INSERT INTO push_subscriptions(endpoint,user_id,p256dh,auth,key_id)
+    VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT(endpoint) DO UPDATE SET
+      p256dh=excluded.p256dh, auth=excluded.auth, key_id=excluded.key_id
+    WHERE push_subscriptions.user_id=excluded.user_id
+    RETURNING endpoint`,
+    [
+      subscription.endpoint,
+      userId,
+      subscription.p256dh,
+      subscription.auth,
+      subscription.keyId,
+    ],
+  );
+  if (!written.rowCount)
+    throw new Error('Subscription belongs to another account');
+  await client.query('COMMIT');
+} catch (error) {
+  await client.query('ROLLBACK');
+  throw error;
+}
+```
+
+Unsubscribe uses `DELETE ... WHERE user_id = $1 AND endpoint = $2`. Missing rows succeed. Select recipients with `SELECT endpoint,p256dh,auth,key_id AS "keyId" FROM push_subscriptions WHERE user_id = $1`.
+
+## Drizzle with PostgreSQL
+
+Define the table in your application schema.
+
+```ts
+import { pgTable, text } from 'drizzle-orm/pg-core';
+import { and, eq } from 'drizzle-orm';
+
+export const subscriptions = pgTable('push_subscriptions', {
+  endpoint: text('endpoint').primaryKey(),
+  userId: text('user_id').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  keyId: text('key_id').notNull(),
+});
+
+await db.transaction(async (tx) => {
+  if (previousEndpoint)
+    await tx
+      .delete(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          eq(subscriptions.endpoint, previousEndpoint),
+        ),
+      );
+  const updated = await tx
+    .insert(subscriptions)
+    .values({ ...subscription, userId })
+    .onConflictDoUpdate({
+      target: subscriptions.endpoint,
+      set: {
+        p256dh: subscription.p256dh,
+        auth: subscription.auth,
+        keyId: subscription.keyId,
+      },
+      setWhere: eq(subscriptions.userId, userId),
+    })
+    .returning({ endpoint: subscriptions.endpoint });
+  if (!updated.length)
+    throw new Error('Subscription belongs to another account');
+});
+```
+
+For unsubscribe, delete with both `userId` and `endpoint` predicates. Recipient selection is `db.select().from(subscriptions).where(eq(subscriptions.userId, userId))`.
+
+## Prisma with PostgreSQL
+
+The model belongs in your Prisma schema.
+
+```prisma
+model PushSubscription {
+  endpoint String @id
+  userId   String
+  p256dh   String
+  auth     String
+  keyId    String
+  @@index([userId])
+}
+```
+
+Use a transaction and a conditional SQL upsert so another user's existing row cannot be overwritten between an ownership check and an update. `Prisma.sql` keeps the values parameterized.
+
+```ts
+import { Prisma } from '@prisma/client';
+
+await prisma.$transaction(async (tx) => {
+  if (previousEndpoint)
+    await tx.pushSubscription.deleteMany({
+      where: { userId, endpoint: previousEndpoint },
+    });
+  const count = await tx.$executeRaw(Prisma.sql`
+    INSERT INTO "PushSubscription" ("endpoint","userId","p256dh","auth","keyId")
+    VALUES (${subscription.endpoint},${userId},${subscription.p256dh},${subscription.auth},${subscription.keyId})
+    ON CONFLICT ("endpoint") DO UPDATE SET
+      "p256dh"=excluded."p256dh", "auth"=excluded."auth", "keyId"=excluded."keyId"
+    WHERE "PushSubscription"."userId"=excluded."userId"
+  `);
+  if (!count) throw new Error('Subscription belongs to another account');
+});
+```
+
+Unsubscribe uses `deleteMany({ where: { userId, endpoint } })`. Select recipients with `findMany({ where: { userId } })`. An authorized account-transfer flow can use its own transaction and stronger proof.
+
+## SQLite
+
+This example uses an application-owned `better-sqlite3` connection named `db`. Use the PostgreSQL column names and a unique endpoint. SQLite's `ON CONFLICT` supports the same ownership predicate.
+
+```ts
+const save = db.transaction((userId, subscription, previousEndpoint) => {
+  if (previousEndpoint)
+    db.prepare(
+      'DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?',
+    ).run(userId, previousEndpoint);
+  const result = db
+    .prepare(
+      `
+    INSERT INTO push_subscriptions(endpoint,user_id,p256dh,auth,key_id)
+    VALUES (@endpoint,@userId,@p256dh,@auth,@keyId)
+    ON CONFLICT(endpoint) DO UPDATE SET
+      p256dh=excluded.p256dh, auth=excluded.auth, key_id=excluded.key_id
+    WHERE push_subscriptions.user_id=excluded.user_id
+  `,
+    )
+    .run({ ...subscription, userId });
+  if (!result.changes)
+    throw new Error('Subscription belongs to another account');
+});
+```
+
+Unsubscribe deletes by both user ID and endpoint. Select `key_id AS keyId` when loading records. The transaction wrapper rolls back old-row deletion when the replacement conflicts.
+
+## Drizzle with Cloudflare D1
+
+Define the table with `drizzle-orm/sqlite-core` and a unique endpoint. D1 does not provide an interactive transaction callback. Use Drizzle's transactional `batch` for replacement.
+
+```ts
+import { sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { and, eq, sql } from 'drizzle-orm';
+
+const subscriptions = sqliteTable('push_subscriptions', {
+  endpoint: text('endpoint').primaryKey(),
+  userId: text('user_id').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  keyId: text('key_id').notNull(),
+});
+const write = db
+  .insert(subscriptions)
+  .values({ ...subscription, userId })
+  .onConflictDoUpdate({
+    target: subscriptions.endpoint,
+    set: {
+      p256dh: subscription.p256dh,
+      auth: subscription.auth,
+      keyId: subscription.keyId,
+    },
+    setWhere: eq(subscriptions.userId, userId),
+  })
+  .returning({ endpoint: subscriptions.endpoint });
+const results = previousEndpoint
+  ? await db.batch([
+      write,
+      db
+        .delete(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, userId),
+            eq(subscriptions.endpoint, previousEndpoint),
+            sql`exists (select 1 from ${subscriptions} as replacement where replacement.endpoint=${subscription.endpoint} and replacement.user_id=${userId})`,
+          ),
+        ),
+    ])
+  : await db.batch([write]);
+if (!results[0].length)
+  throw new Error('Subscription belongs to another account');
+```
+
+The new row is written first. Cleanup requires the new row to belong to the caller, so a refused upsert does not delete the old row. D1 batch execution is atomic. Unsubscribe deletes with both `eq(subscriptions.userId, userId)` and `eq(subscriptions.endpoint, endpoint)`. Recipient selection is `db.select().from(subscriptions).where(eq(subscriptions.userId, userId))`.
+
+## In-memory test store
+
+Use this only for tests and local demos. Data disappears on restart. Each process has its own Map.
+
+```ts
+import type { PushSubscriptionRecord } from 'pushpilot/server';
+const rows = new Map<
+  string,
+  { userId: string; subscription: PushSubscriptionRecord }
+>();
+
+function save(
+  userId: string,
+  subscription: PushSubscriptionRecord,
+  previousEndpoint: string | null,
+) {
+  const existing = rows.get(subscription.endpoint);
+  if (existing && existing.userId !== userId)
+    throw new Error('Subscription belongs to another account');
+  if (previousEndpoint && rows.get(previousEndpoint)?.userId === userId)
+    rows.delete(previousEndpoint);
+  rows.set(subscription.endpoint, { userId, subscription });
+}
+function remove(userId: string, endpoint: string) {
+  if (rows.get(endpoint)?.userId === userId) rows.delete(endpoint);
+}
+function select(userId: string) {
+  return [...rows.values()]
+    .filter((row) => row.userId === userId)
+    .map((row) => row.subscription);
+}
+```
+
+## Prune expired recipients
+
+Keep the selected array stable while processing its report. Never delete on 401, 403, `outdated`, or another failed result.
+
+```ts
+const selected = await loadOwnedSubscriptions(userId);
+const report = await push.send(selected, { title: 'New reply' });
+for (const result of report.results) {
+  if (result.status === 'gone') {
+    const row = selected[result.index];
+    if (row) await deleteOwnedSubscription(userId, row.endpoint);
+  }
+}
+```
+
+The load and delete functions are application queries. For high concurrency, include the selected row's version or original keyId in the delete predicate so an old send cannot delete a concurrently replaced record. Use row IDs for database work and `endpointHash` for logs.

@@ -1,0 +1,50 @@
+---
+title: Subscriptions and storage
+description: What a subscription is, who owns it, and the rules your database must enforce.
+---
+
+import { Aside, LinkCard } from '@astrojs/starlight/components';
+
+A subscription is one browser's address for push messages. pushpilot gives you the subscription. You store it, tie it to a user, and pass it back to `send`.
+
+## The record
+
+`onSubscribe` receives a record with four strings.
+
+| Field      | Meaning                                                                |
+| ---------- | ---------------------------------------------------------------------- |
+| `endpoint` | The push service URL for this browser.                                 |
+| `p256dh`   | The browser's public encryption key.                                   |
+| `auth`     | The browser's auth secret.                                             |
+| `keyId`    | A fingerprint of the VAPID public key the subscription was made under. |
+
+Do not edit `keyId` in the database to simulate rotation. See [Key rotation](/concepts/key-rotation/).
+
+## The lifecycle
+
+1. The browser client posts a subscribe request to your handler.
+2. The handler calls `onSubscribe({ request, subscription, previousEndpoint })`.
+3. Your callback authenticates the request and writes a row.
+4. Later, you select rows and call `push.send`.
+5. On unsubscribe, the handler calls `onUnsubscribe({ request, endpoint })` and you delete the row.
+
+Both callbacks return nothing for a 204, or a 4xx or 5xx `Response` to refuse the operation.
+
+## Rules your storage must follow
+
+<Aside type="caution" title="Endpoints are capabilities">
+  Anyone holding an endpoint can try to send to it. Never print endpoints, auth
+  secrets, or the VAPID private key in logs.
+</Aside>
+
+- `userId` always comes from your authenticated server session. Never accept a user ID from the subscribe JSON body.
+- Use a unique endpoint constraint and an idempotent upsert. Repeated subscribe requests must converge to one row.
+- Treat `previousEndpoint` as untrusted cleanup data. Delete it only within the authenticated user's scope.
+- Scope updates to the existing owner. Endpoint possession alone does not prove ownership, so an account switch needs a separate application decision.
+- A submitted public key matching your config does not prove ownership of a browser subscription.
+
+<LinkCard
+  title="Store subscriptions in your database"
+  description="Upsert, replacement, and pruning patterns for PostgreSQL, Drizzle, Prisma, SQLite, and D1."
+  href="/guides/storage/"
+/>

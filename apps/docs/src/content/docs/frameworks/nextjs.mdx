@@ -1,0 +1,25 @@
+---
+title: Next.js
+description: Mount the push handler as a route handler.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The handler accepts one standard `Request` and returns a `Promise<Response>`. Your callbacks own auth and database writes. Avoid middleware that consumes the request body before the handler.
+
+```ts
+// app/api/push/route.ts
+import { push, callbacks } from '@/lib/push.server';
+export const POST = push.handler(callbacks);
+```
+
+`push` and `callbacks` are application-defined. See the [Quickstart](/quickstart/) for a starting point.
+
+<Aside type="caution">
+  Keep the VAPID private key in a server-only module. Do not prefix it with
+  `NEXT_PUBLIC_`.
+</Aside>
+
+Build a worker into `public/sw.js` using your PWA setup or the shared example build script. See [Build the service worker](/guides/service-worker-setup/).
+
+The runnable example lives in `examples/next`. Its shared store and password are for local testing only.

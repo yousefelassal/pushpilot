@@ -50,7 +50,9 @@ for (const framework of frameworks.length
 					ready = true;
 					break;
 				}
-			} catch {}
+			} catch {
+				// Connection refusal is expected until the example server begins listening.
+			}
 			await new Promise((done) => setTimeout(done, 100));
 		}
 		assert(ready, `${framework} did not start`);
@@ -103,7 +105,9 @@ for (const framework of frameworks.length
 		if (child.pid) {
 			try {
 				process.kill(-child.pid, 'SIGTERM');
-			} catch {}
+			} catch {
+				// The process group already exited, so there is nothing left to stop.
+			}
 		}
 		await new Promise((done) =>
 			child.exitCode !== null ? done() : child.once('exit', done),
