@@ -32,7 +32,8 @@ jobs:
       - run: pnpm build
       - run: PUSHPILOT_SMOKE_BUN=1 PUSHPILOT_SMOKE_DENO=1 pnpm smoke
   browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.56 cannot install browsers on ubuntu-latest (26.04).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
