@@ -53,11 +53,14 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
 const origin = `http://127.0.0.1:${address.port}`;
 try {
+	const selected = process.argv.slice(2);
+	if (selected.some((name) => !['chromium', 'firefox'].includes(name)))
+		throw new Error('Choose chromium or firefox.');
 	for (const [name, engine] of [
 		['chromium', chromium],
 		['firefox', firefox],
-	]) {
-		const browser = await engine.launch({ headless: true });
+	].filter(([name]) => !selected.length || selected.includes(name))) {
+		const browser = await engine.launch({ headless: true, timeout: 30000 });
 		try {
 			const context = await browser.newContext({
 				permissions: ['notifications'],
@@ -169,7 +172,7 @@ try {
 			await browser.close();
 		}
 	}
-	assert(posts >= 2);
+	assert(posts >= (selected.length || 2));
 } finally {
 	await new Promise((resolve) => server.close(resolve));
 }

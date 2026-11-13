@@ -22,3 +22,9 @@ Before a public release, record device, OS, browser version, date, and result fo
 - Denied permission produces a settings message without repeated prompts.
 
 Keep test subscriptions and VAPID secrets out of committed fixtures. Publishing and deployment require a separate release decision.
+
+## Local implementation verification
+
+On 2026-11-13, the implementation passed 85 unit tests, strict TypeScript checks, lint, formatting, package export checks, strict packed installation, CLI probes, and the documentation build. Packed crypto checks passed on Node 22 and 24, Bun, Deno, and workerd. All four framework examples passed builds and live authenticated route checks.
+
+Chromium passed actual worker activation, client state, remount, and CDP-injected valid and malformed push display. Notification permission was denied by the local host, and CDP delivery bypasses real provider transport. Firefox's downloaded browser failed to launch locally with sandbox-extension and framebuffer errors. Firefox remains configured in the Linux CI workflow and is not a claimed local pass. Run `pnpm smoke:browser chromium` for the isolated Chromium check or `pnpm smoke:browser` for both engines.
