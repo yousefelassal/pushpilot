@@ -1,6 +1,6 @@
 {
 	"name": "pushpilot",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Web Push for applications that own their infrastructure.",
 	"type": "module",
 	"license": "MIT",
