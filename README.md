@@ -1,0 +1,3 @@
+# pushpilot
+
+pushpilot is a Web Push library for apps that keep their own database. It gives you a route handler built on the standard `Request` and `Response`, a browser client with a React hook, a service worker helper that always shows a notification, and a CLI that generates and checks VAPID keys. You store subscriptions wherever you like: the handler calls your `onSubscribe` and `onUnsubscribe` callbacks, and `send` takes your subscriptions and tells you which ones to delete. It uses only WebCrypto and `fetch`, so the same code runs on Node, Bun, Deno, and Cloudflare Workers. Nothing is built yet. [SPEC.md](SPEC.md) describes the planned design.
