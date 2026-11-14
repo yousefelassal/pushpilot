@@ -1,10 +1,23 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import { DOCS_DESCRIPTION } from './src/lib/og.ts';
+
+const origin = process.env.DOCS_SITE_ORIGIN;
+if (origin) {
+	const url = new URL(origin);
+	if (!['https:', 'http:'].includes(url.protocol) || url.origin !== origin) {
+		throw new Error(
+			'DOCS_SITE_ORIGIN must be an HTTP(S) origin without a path or trailing slash.',
+		);
+	}
+}
 export default defineConfig({
+	site: origin,
 	integrations: [
 		starlight({
 			title: 'pushpilot',
-			description: 'Web Push for applications that own their infrastructure.',
+			description: DOCS_DESCRIPTION,
+			routeMiddleware: './src/route-middleware.ts',
 			social: [
 				{
 					icon: 'github',
