@@ -158,16 +158,10 @@ async function assertKeyPairMatches(
 		y: encodeBase64(raw.subarray(33)),
 		d: privateKey,
 	};
-	const signing = await crypto.subtle.importKey('jwk', jwk, P256_ECDSA, false, [
-		'sign',
+	const [signing, verifying] = await Promise.all([
+		crypto.subtle.importKey('jwk', jwk, P256_ECDSA, false, ['sign']),
+		crypto.subtle.importKey('raw', raw, P256_ECDSA, false, ['verify']),
 	]);
-	const verifying = await crypto.subtle.importKey(
-		'raw',
-		raw,
-		P256_ECDSA,
-		false,
-		['verify'],
-	);
 
 	const message = new TextEncoder().encode(KEY_PAIR_CHECK_MESSAGE);
 	const signature = await crypto.subtle.sign(ECDSA_SHA256, signing, message);
@@ -182,8 +176,11 @@ async function prepareKey(
 	subject: string,
 ): Promise<PreparedKey> {
 	const { publicKey, privateKey } = pair;
-	await assertKeyPairMatches(publicKey, privateKey);
-	return { publicKey, privateKey, keyId: await keyId(publicKey), subject };
+	const [, id] = await Promise.all([
+		assertKeyPairMatches(publicKey, privateKey),
+		keyId(publicKey),
+	]);
+	return { publicKey, privateKey, keyId: id, subject };
 }
 
 /**

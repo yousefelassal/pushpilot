@@ -133,19 +133,22 @@ async function resolveRecipient(
 	candidate: PushSubscriptionRecord,
 ): Promise<{ recipient: Recipient } | { result: DeliveryResult }> {
 	const { input, blocked } = state;
+	const [endpointHash, parsed] = await Promise.allSettled([
+		hashEndpoint(candidate?.endpoint),
+		parseSubscription(candidate, input.matchHost),
+	]);
+	if (endpointHash.status === 'rejected') throw endpointHash.reason;
+
 	const base: ResultBase = {
 		index,
-		endpointHash: await hashEndpoint(candidate?.endpoint),
+		endpointHash: endpointHash.value,
 		attempts: 0,
 		needsResubscribe: false,
 	};
-
-	let subscription: PushSubscriptionRecord;
-	try {
-		subscription = await parseSubscription(candidate, input.matchHost);
-	} catch {
+	if (parsed.status === 'rejected')
 		return { result: failure(base, null, 'invalid-subscription') };
-	}
+
+	const subscription = parsed.value;
 
 	const known = {
 		...base,
@@ -243,25 +246,20 @@ async function sendOne(
 	if ('result' in resolved) return resolved.result;
 	const { recipient } = resolved;
 
-	let body: Uint8Array<ArrayBuffer>;
-	try {
-		body = await encryptNotification(
-			toWireSubscription(recipient),
-			state.input.payload,
-		);
-	} catch {
+	const [body, authorization] = await Promise.allSettled([
+		encryptNotification(toWireSubscription(recipient), state.input.payload),
+		authorizationFor(state, recipient),
+	]);
+
+	if (body.status === 'rejected')
 		// Bad browser keys are not a VAPID problem, so resubscribing under a new key would not help.
 		return failure(
 			{ ...recipient.base, needsResubscribe: false },
 			null,
 			'invalid-subscription',
 		);
-	}
 
-	let authorization: string;
-	try {
-		authorization = await authorizationFor(state, recipient);
-	} catch {
+	if (authorization.status === 'rejected') {
 		state.blocked.add(recipient.group);
 		return failure(recipient.base, null, 'configuration');
 	}
@@ -269,7 +267,7 @@ async function sendOne(
 	return sendWithRetry(
 		state,
 		recipient,
-		buildRequest(state.input, body, authorization),
+		buildRequest(state.input, body.value, authorization.value),
 	);
 }
 

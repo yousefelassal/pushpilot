@@ -252,14 +252,13 @@ function printReport(
 
 async function runDoctor(flags: Flags): Promise<void> {
 	const env = await loadEnv(flags);
-	const publicKeyResult = await checkPublicKey(env);
-	const checks = [
-		publicKeyResult.check,
-		checkPrivateKey(env),
-		await checkVapid(env),
-	];
-
 	const probe = flags.get('--url');
+	const [publicKeyResult, vapidCheck] = await Promise.all([
+		checkPublicKey(env),
+		checkVapid(env),
+	]);
+	const checks = [publicKeyResult.check, checkPrivateKey(env), vapidCheck];
+
 	if (typeof probe === 'string')
 		checks.push(
 			await checkHandler(
