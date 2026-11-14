@@ -7,6 +7,8 @@ export default defineConfig({
 		es2018: true,
 	},
 	ignorePatterns: [
+		'**/.agents/**',
+		'**/.claude/**',
 		'.wrangler/**',
 		'**/node_modules/**',
 		'worker-configuration.d.ts',
