@@ -4,11 +4,17 @@
 	"type": "module",
 	"scripts": {
 		"dev": "astro dev",
-		"build": "astro build",
+		"build": "astro sync && tsc --noEmit && astro build && node scripts/verify-og.mjs",
 		"preview": "astro preview"
 	},
 	"dependencies": {
 		"astro": "5.18.2",
 		"@astrojs/starlight": "0.36.0"
+	},
+	"devDependencies": {
+		"@fontsource/atkinson-hyperlegible": "5.3.0",
+		"parse5": "8.1.1",
+		"takumi-js": "2.20.0",
+		"typescript": "5.9.3"
 	}
 }
