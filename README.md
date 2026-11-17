@@ -1,5 +1,8 @@
 # pushpilot
 
+[![npm version](https://img.shields.io/npm/v/pushpilot)](https://www.npmjs.com/package/pushpilot)
+[![npm downloads](https://img.shields.io/npm/dm/pushpilot)](https://www.npmjs.com/package/pushpilot)
+
 Web Push for apps that own their database.
 
 pushpilot sends Web Push notifications from Node, Bun, Deno, or Cloudflare Workers. It gives you a route handler, a browser client, a React hook, a service worker helper, and a CLI for VAPID keys. You keep your auth and your database: pushpilot calls your code to store subscriptions and tells you which ones to delete after each send.
